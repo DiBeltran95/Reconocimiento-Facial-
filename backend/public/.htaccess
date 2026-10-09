@@ -1,5 +1,6 @@
 Options -Indexes
-DirectoryIndex index.php
+# index.html para que /panel/ abra el panel (si no, 403 por -Indexes).
+DirectoryIndex index.php index.html
 
 # Algunos hostings compartidos eliminan la cabecera Authorization.
 CGIPassAuth On
@@ -8,8 +9,14 @@ CGIPassAuth On
     RewriteEngine On
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
+    # Redirecciones con %{REQUEST_URI} (ruta pública): una sustitución relativa
+    # filtra la ruta del disco en hostings que montan el sitio como alias.
+    # Raíz → panel
+    RewriteCond %{REQUEST_URI} /$
+    RewriteRule ^$ %{REQUEST_URI}panel/ [R=302,L]
+
     # /panel → /panel/
-    RewriteRule ^panel$ panel/ [R=301,L]
+    RewriteRule ^panel$ %{REQUEST_URI}/ [R=301,L]
 
     # Archivos reales (panel web) se sirven tal cual; el resto va a la API.
     RewriteCond %{REQUEST_FILENAME} -f [OR]
