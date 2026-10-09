@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; script-src 'self'; frame-ancestors 'none'">
+  <title>Control de Personal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap">
+  <link rel="stylesheet" href="app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322D3EE' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2'/%3E%3Ccircle cx='12' cy='11' r='4'/%3E%3C/svg%3E">
+</head>
+<body>
+  <!-- ============================ ACCESO ============================ -->
+  <main id="vista-login" class="login" hidden>
+    <div class="login__tarjeta">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-scan"/></svg></div>
+      <p class="etiqueta" id="login-negocio">Control de personal</p>
+      <h1>Panel administrativo</h1>
+      <p class="suave">Personal, horarios, cumplimiento y reportes. Requiere una cuenta Administrativa.</p>
+      <form id="form-login" novalidate>
+        <label class="campo">
+          <span>Usuario o correo</span>
+          <input name="usuario" autocomplete="username" autocapitalize="none" required>
+        </label>
+        <label class="campo">
+          <span>Contraseña</span>
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <p class="error" id="login-error" role="alert" hidden></p>
+        <button class="btn btn--primario btn--bloque" type="submit">Ingresar</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- ============================ APLICACIÓN ============================ -->
+  <div id="vista-app" class="app" hidden>
+    <header class="barra">
+      <div class="barra__marca">
+        <div class="logo logo--chico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-scan"/></svg></div>
+        <div>
+          <p class="etiqueta" id="app-negocio">Control de personal</p>
+          <p class="barra__titulo">Asistencia biométrica</p>
+        </div>
+      </div>
+      <label class="selector-sede">
+        <span class="sr">Sede</span>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-pin"/></svg>
+        <select id="sede"></select>
+      </label>
+      <div class="barra__usuario">
+        <button class="btn-icono" id="btn-tema" type="button" aria-label="Cambiar tema claro u oscuro">
+          <svg viewBox="0 0 24 24"><use href="#i-tema"/></svg>
+        </button>
+        <span class="suave" id="usuario-nombre"></span>
+        <button class="btn btn--fantasma" id="btn-salir" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-salir"/></svg>Salir
+        </button>
+      </div>
+    </header>
+
+    <nav class="pestanas" role="tablist" aria-label="Secciones">
+      <button role="tab" data-vista="asistencia" aria-selected="true"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-grafica"/></svg>Asistencia</button>
+      <button role="tab" data-vista="cumplimiento" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-check"/></svg>Cumplimiento</button>
+      <button role="tab" data-vista="personal" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-personas"/></svg>Personal</button>
+      <button role="tab" data-vista="horarios" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-reloj"/></svg>Horarios</button>
+      <button role="tab" data-vista="usuarios" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-escudo"/></svg>Usuarios</button>
+      <button role="tab" data-vista="kioscos" aria-selected="false"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-movil"/></svg>Kioscos</button>
+    </nav>
+
+    <!-- ----------------------------- Asistencia ----------------------------- -->
+    <section class="vista" id="vista-asistencia" role="tabpanel">
+      <div class="cabecera">
+        <div class="fecha">
+          <button class="btn-icono" id="dia-anterior" type="button" aria-label="Día anterior"><svg viewBox="0 0 24 24"><use href="#i-izq"/></svg></button>
+          <label class="fecha__control">
+            <span class="etiqueta" id="fecha-etiqueta">Hoy</span>
+            <input type="date" id="fecha" aria-label="Fecha del reporte">
+          </label>
+          <button class="btn-icono" id="dia-siguiente" type="button" aria-label="Día siguiente"><svg viewBox="0 0 24 24"><use href="#i-der"/></svg></button>
+        </div>
+        <div class="acciones">
+          <button class="btn btn--fantasma" id="btn-csv-dia" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-descarga"/></svg>CSV del día</button>
+          <button class="btn btn--secundario" id="btn-csv-rango" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-calendario"/></svg>Exportar rango</button>
+        </div>
+      </div>
+      <div class="kpis" id="kpis"></div>
+      <div class="filtros">
+        <label class="buscar">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-buscar"/></svg>
+          <span class="sr">Buscar</span>
+          <input type="search" id="buscar-asistencia" placeholder="Buscar por nombre o documento">
+        </label>
+        <div class="chips" id="chips-estado" role="group" aria-label="Filtrar"></div>
+      </div>
+      <div class="tabla-envoltura">
+        <table class="tabla" id="tabla-asistencia">
+          <thead><tr><th>Empleado</th><th>Turno</th><th>Entrada</th><th>Salida</th><th>Tiempo</th><th>Cumplimiento</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="vacio" id="vacio-asistencia" hidden></div>
+      </div>
+    </section>
+
+    <!-- ----------------------------- Cumplimiento ----------------------------- -->
+    <section class="vista" id="vista-cumplimiento" role="tabpanel" hidden>
+      <div class="cabecera">
+        <div class="chips" id="chips-periodo" role="group" aria-label="Período"></div>
+        <div class="acciones">
+          <label class="fecha__control"><span class="etiqueta">Desde</span><input type="date" id="cump-desde"></label>
+          <label class="fecha__control"><span class="etiqueta">Hasta</span><input type="date" id="cump-hasta"></label>
+          <button class="btn btn--secundario" id="btn-csv-cump" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-descarga"/></svg>CSV</button>
+        </div>
+      </div>
+      <div class="cump-resumen" id="cump-resumen"></div>
+      <div class="leyenda" id="cump-leyenda"></div>
+      <div class="tabla-envoltura">
+        <table class="tabla" id="tabla-cumplimiento">
+          <thead><tr><th>Empleado</th><th>%</th><th>Días</th><th>Tardanzas</th><th>Ausencias</th><th>Salidas antes</th><th>Día a día</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="vacio" id="vacio-cumplimiento" hidden></div>
+      </div>
+    </section>
+
+    <!-- ----------------------------- Personal ----------------------------- -->
+    <section class="vista" id="vista-personal" role="tabpanel" hidden>
+      <div class="cabecera">
+        <label class="buscar">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-buscar"/></svg>
+          <span class="sr">Buscar</span>
+          <input type="search" id="buscar-personal" placeholder="Buscar por nombre, documento o cargo">
+        </label>
+        <button class="btn btn--primario" id="btn-nuevo" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Nuevo empleado</button>
+      </div>
+      <div class="rejilla-personal" id="lista-personal"></div>
+      <div class="vacio" id="vacio-personal" hidden></div>
+    </section>
+
+    <!-- ----------------------------- Horarios ----------------------------- -->
+    <section class="vista" id="vista-horarios" role="tabpanel" hidden>
+      <div class="banda">
+        <div>
+          <p class="etiqueta">Rotación semanal</p>
+          <p>Define el orden de turnos (p. ej. A → B) y desde qué semana empieza. Cada lunes el personal pasa al siguiente turno.</p>
+        </div>
+        <button class="btn btn--primario" id="btn-asignar" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-personas"/></svg>Asignar rotación</button>
+      </div>
+      <div class="cabecera">
+        <p class="etiqueta">Turnos</p>
+        <button class="btn btn--secundario" id="btn-nuevo-turno" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Nuevo turno</button>
+      </div>
+      <div class="rejilla-turnos" id="lista-turnos"></div>
+      <div class="vacio" id="vacio-turnos" hidden></div>
+    </section>
+
+    <!-- ----------------------------- Usuarios ----------------------------- -->
+    <section class="vista" id="vista-usuarios" role="tabpanel" hidden>
+      <div class="cabecera">
+        <p class="suave"><strong>General:</strong> vincula y opera kioscos en cualquier sede. <strong>Administrativo:</strong> gestiona personal, horarios, cumplimiento, reportes y cuentas.</p>
+        <button class="btn btn--primario" id="btn-nuevo-usuario" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Nuevo usuario</button>
+      </div>
+      <div class="lista-kioscos" id="lista-usuarios"></div>
+    </section>
+
+    <!-- ----------------------------- Kioscos ----------------------------- -->
+    <section class="vista" id="vista-kioscos" role="tabpanel" hidden>
+      <p class="suave">Teléfonos o tablets vinculados. Para agregar uno, instala la app y vincúlalo con una cuenta General o Administrativa.</p>
+      <div class="lista-kioscos" id="lista-kioscos"></div>
+    </section>
+  </div>
+
+  <!-- ============================ DIÁLOGOS ============================ -->
+  <dialog class="dialogo dialogo--ancho" id="dlg-empleado" aria-labelledby="dlg-empleado-titulo">
+    <form method="dialog" id="form-empleado" novalidate>
+      <header class="dialogo__cabecera">
+        <h2 id="dlg-empleado-titulo">Nuevo empleado</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <div class="dos-columnas">
+          <label class="campo"><span>Documento</span><input name="documento" required maxlength="20" autocomplete="off"><small class="ayuda">Sin puntos ni espacios</small></label>
+          <label class="campo"><span>Nombre completo</span><input name="nombre" required maxlength="120" autocomplete="off"></label>
+          <label class="campo"><span>Cargo <em>(opcional)</em></span><input name="cargo" maxlength="60" autocomplete="off"></label>
+          <label class="campo"><span>Sede</span><select name="sede_id" required></select></label>
+        </div>
+
+        <fieldset class="rostro" id="bloque-horario" hidden>
+          <legend>Horario</legend>
+          <div id="plan-empleado"></div>
+          <button class="btn btn--secundario" type="button" id="btn-rotacion-empleado"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-rotar"/></svg>Cambiar rotación</button>
+        </fieldset>
+
+        <fieldset class="rostro" id="bloque-rostro">
+          <legend>Reconocimiento facial</legend>
+          <div class="miniaturas" id="miniaturas"></div>
+          <label class="campo">
+            <span>Fotos del rostro (1 a 3)</span>
+            <input type="file" name="fotos" accept="image/jpeg,image/png,image/webp" multiple>
+            <small class="ayuda">De frente, buena luz, sin gafas oscuras ni gorra. Reemplazan las actuales. También puedes registrarlo desde la app con la cámara.</small>
+          </label>
+          <label class="check">
+            <input type="checkbox" name="consentimiento">
+            <span>El empleado autorizó el tratamiento de sus datos biométricos (Ley 1581 de 2012).</span>
+          </label>
+        </fieldset>
+        <p class="error" id="empleado-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <button class="btn btn--peligro" type="button" id="btn-baja" hidden>Dar de baja</button>
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit" id="btn-guardar-empleado">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialogo" id="dlg-turno" aria-labelledby="dlg-turno-titulo">
+    <form method="dialog" id="form-turno" novalidate>
+      <header class="dialogo__cabecera">
+        <h2 id="dlg-turno-titulo">Nuevo turno</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <label class="campo"><span>Nombre del turno</span><input name="nombre" required maxlength="60" placeholder="Ej.: Turno A · Mañana partida"></label>
+        <div class="campo">
+          <span>Bloques del día</span>
+          <div id="bloques-turno" class="bloques"></div>
+          <button class="btn btn--fantasma" type="button" id="btn-agregar-bloque"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Agregar bloque</button>
+          <div class="barra-turno" id="vista-turno" aria-hidden="true"></div>
+        </div>
+        <fieldset class="campo dias" id="dias-turno"><legend>Días que aplica</legend></fieldset>
+        <label class="campo"><span>Tolerancia (minutos)</span><input type="number" name="tolerancia_min" min="0" max="120" step="5" value="10"><small class="ayuda">Gracia antes de contar tardanza o salida anticipada.</small></label>
+        <p class="error" id="turno-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <button class="btn btn--peligro" type="button" id="btn-archivar-turno" hidden>Archivar</button>
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit">Guardar turno</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialogo dialogo--ancho" id="dlg-rotacion" aria-labelledby="dlg-rotacion-titulo">
+    <form method="dialog" id="form-rotacion" novalidate>
+      <header class="dialogo__cabecera">
+        <h2 id="dlg-rotacion-titulo">Asignar rotación</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <p class="etiqueta">1 · Orden de los turnos</p>
+        <ol class="secuencia" id="secuencia"></ol>
+        <button class="btn btn--fantasma" type="button" id="btn-agregar-semana"><svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Agregar semana</button>
+        <p class="etiqueta" style="margin-top:20px">2 · Semana de inicio</p>
+        <label class="campo"><span class="sr">Semana de inicio</span><input type="date" name="desde" required><small class="ayuda" id="rotacion-semana"></small></label>
+        <div id="rotacion-previa" class="previa"></div>
+        <div id="bloque-personal-rotacion">
+          <p class="etiqueta" style="margin-top:20px">3 · Personal</p>
+          <label class="check"><input type="checkbox" id="rot-todos"><span>Seleccionar todos</span></label>
+          <div class="checklist" id="rotacion-personal"></div>
+        </div>
+        <p class="error" id="rotacion-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit" id="btn-guardar-rotacion">Asignar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialogo" id="dlg-usuario" aria-labelledby="dlg-usuario-titulo">
+    <form method="dialog" id="form-usuario" novalidate>
+      <header class="dialogo__cabecera">
+        <h2 id="dlg-usuario-titulo">Nuevo usuario</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <fieldset class="campo segmento"><legend>Tipo de cuenta</legend>
+          <label><input type="radio" name="rol" value="GENERAL" checked><span>General</span></label>
+          <label><input type="radio" name="rol" value="ADMINISTRATIVO"><span>Administrativo</span></label>
+        </fieldset>
+        <label class="campo"><span>Nombre completo</span><input name="nombre" required maxlength="120"></label>
+        <label class="campo"><span>Usuario para ingresar</span><input name="usuario" required maxlength="60" autocapitalize="none" autocomplete="off"><small class="ayuda">Ej.: kiosco.centro · sin espacios</small></label>
+        <label class="campo"><span id="etq-clave">Contraseña</span><input type="password" name="password" autocomplete="new-password" minlength="8"><small class="ayuda">Mínimo 8 caracteres</small></label>
+        <label class="check" id="fila-activo" hidden><input type="checkbox" name="activo" checked><span>Cuenta activa</span></label>
+        <p class="error" id="usuario-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialogo dialogo--lateral" id="dlg-detalle" aria-labelledby="detalle-nombre">
+    <div class="dialogo__cabecera">
+      <div>
+        <p class="etiqueta">Detalle del día</p>
+        <h2 id="detalle-nombre"></h2>
+        <p class="suave" id="detalle-sub"></p>
+      </div>
+      <button class="btn-icono" type="button" data-cerrar aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="dialogo__cuerpo">
+      <div id="detalle-turno"></div>
+      <ol class="linea-tiempo" id="detalle-lista"></ol>
+    </div>
+  </dialog>
+
+  <dialog class="dialogo" id="dlg-rango" aria-labelledby="rango-titulo">
+    <form method="dialog" id="form-rango">
+      <header class="dialogo__cabecera">
+        <h2 id="rango-titulo">Exportar para nómina</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <p class="suave">Un archivo CSV con una fila por empleado y día (máximo 62 días), con turno y cumplimiento.</p>
+        <div class="dos-columnas">
+          <label class="campo"><span>Desde</span><input type="date" name="desde" required></label>
+          <label class="campo"><span>Hasta</span><input type="date" name="hasta" required></label>
+        </div>
+        <p class="error" id="rango-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit">Descargar CSV</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="avisos" id="avisos" aria-live="polite"></div>
+
+  <!-- ============================ ÍCONOS (trazo 2 px) ============================ -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="10" r="3.2"/><path d="M7.5 17.5a5 5 0 0 1 9 0"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+      <symbol id="i-salir" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-tema" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-grafica" viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></symbol>
+      <symbol id="i-personas" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-movil" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+      <symbol id="i-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+      <symbol id="i-escudo" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></symbol>
+      <symbol id="i-rotar" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M3 21v-5h5"/></symbol>
+      <symbol id="i-izq" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-der" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+      <symbol id="i-arriba" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+      <symbol id="i-abajo" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="i-descarga" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+      <symbol id="i-calendario" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+      <symbol id="i-buscar" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-mas" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-entrada" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></symbol>
+      <symbol id="i-alerta" viewBox="0 0 24 24"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3ZM12 9v4M12 17h.01"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-rostro-no" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9 9h.01M15 9h.01M8 15h8M4 4l16 16"/></symbol>
+    </defs>
+  </svg>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

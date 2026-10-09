@@ -1,0 +1,7 @@
+Coloca aquí el modelo de reconocimiento facial con el nombre exacto:
+
+    mobilefacenet.tflite
+
+Requisitos: MobileFaceNet en TensorFlow Lite, entrada float32 [1,112,112,3]
+(o [2,112,112,3]; la app lo ajusta a 1), salida [1,128] o [1,192].
+Ver README.md en la raíz del proyecto para opciones de descarga.

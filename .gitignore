@@ -1,0 +1,20 @@
+# Respaldo de la base de datos de producción: contiene datos reales y hashes
+# de contraseñas. Nunca se sube al repositorio.
+/inventarios_db.sql
+*.sql.gz
+*.dump
+
+# Configuración con credenciales del backend
+backend/config/config.php
+
+# Certificados y perfiles de firma (van como secretos de GitHub, no en el repo)
+*.p12
+*.mobileprovision
+*.cer
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.claude/

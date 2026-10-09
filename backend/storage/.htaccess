@@ -1,0 +1,3 @@
+# Fotos biométricas y archivos internos: nunca accesibles por web.
+# Solo se entregan a través de la API autenticada.
+Require all denied

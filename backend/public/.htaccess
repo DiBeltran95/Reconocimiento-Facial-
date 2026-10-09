@@ -1,0 +1,25 @@
+Options -Indexes
+DirectoryIndex index.php
+
+# Algunos hostings compartidos eliminan la cabecera Authorization.
+CGIPassAuth On
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # /panel → /panel/
+    RewriteRule ^panel$ panel/ [R=301,L]
+
+    # Archivos reales (panel web) se sirven tal cual; el resto va a la API.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "no-referrer"
+</IfModule>

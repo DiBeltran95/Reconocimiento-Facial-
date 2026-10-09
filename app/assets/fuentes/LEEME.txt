@@ -1,0 +1,5 @@
+(Opcional) Para que la tipografía funcione sin internet desde el primer arranque,
+copia aquí los .ttf de Google Fonts con su nombre original, por ejemplo:
+  PlusJakartaSans-Regular.ttf, PlusJakartaSans-SemiBold.ttf, PlusJakartaSans-Bold.ttf,
+  SpaceGrotesk-SemiBold.ttf, SpaceGrotesk-Bold.ttf, JetBrainsMono-Medium.ttf, JetBrainsMono-Bold.ttf
+Si no están, la app los descarga una vez y quedan en caché.
