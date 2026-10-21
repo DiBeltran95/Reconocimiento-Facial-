@@ -41,6 +41,7 @@ $r->delete('/api/cuenta', [Cuenta::class, 'eliminar']);
 $r->put('/api/cuenta/empresa', [Cuenta::class, 'editarEmpresa']);
 $r->post('/api/sedes', [Sedes::class, 'crear']);
 $r->put('/api/sedes/{id}', [Sedes::class, 'actualizar']);
+$r->post('/api/sedes/{id}/elegir', [Sedes::class, 'elegir']);
 
 // Superadministrador de la plataforma ----------------------------------------
 $r->get('/api/plataforma/resumen', [Plataforma::class, 'resumen']);
@@ -53,12 +54,14 @@ $r->put('/api/plataforma/planes/{id}', [Plataforma::class, 'actualizarPlan']);
 // Solo ADMINISTRATIVO -------------------------------------------------------
 $r->get('/api/dispositivos', [Dispositivos::class, 'listar']);
 $r->delete('/api/dispositivos/{id}', [Dispositivos::class, 'revocar']);
+$r->put('/api/dispositivos/{id}', [Dispositivos::class, 'renombrar']);
 
 $r->get('/api/empleados', [Empleados::class, 'listar']);
 $r->post('/api/empleados', [Empleados::class, 'crear']);
 $r->get('/api/empleados/{id}', [Empleados::class, 'ver']);
 $r->put('/api/empleados/{id}', [Empleados::class, 'actualizar']);
 $r->delete('/api/empleados/{id}', [Empleados::class, 'desactivar']);
+$r->post('/api/empleados/{id}/pausa', [Empleados::class, 'pausar']);
 $r->post('/api/empleados/{id}/fotos', [Empleados::class, 'subirFotos']);
 $r->delete('/api/empleados/{id}/fotos', [Empleados::class, 'borrarFotos']);
 $r->get('/api/empleados/{id}/fotos/{n}', [Empleados::class, 'foto']); // administrativo o kiosco
@@ -76,6 +79,7 @@ $r->delete('/api/horarios/{id}', [Horarios::class, 'archivar']);
 $r->get('/api/usuarios', [Usuarios::class, 'listar']);
 $r->post('/api/usuarios', [Usuarios::class, 'crear']);
 $r->put('/api/usuarios/{id}', [Usuarios::class, 'actualizar']);
+$r->post('/api/usuarios/{id}/pausa', [Usuarios::class, 'pausar']);
 
 $r->get('/api/reportes/dia', [Reportes::class, 'dia']);
 $r->get('/api/reportes/dia.csv', [Reportes::class, 'diaCsv']);

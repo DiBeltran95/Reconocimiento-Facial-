@@ -258,6 +258,7 @@ final class CuentaControlador
                 [$empresaId],
             ),
             'plan'        => Plan::deEmpresa($empresaId),
+            'planes'      => Plan::planes($empresaId),
             'aplicativos' => Plan::aplicativos($empresaId),
         ];
     }

@@ -68,15 +68,79 @@ void main() {
       expect(u.rolInventario, RolInventario.vendedor);
       expect(u.rolInventario!.unaSede, isTrue);
       expect(u.sedes, [2]);
-      expect(u.rol, Rol.administrativo);
+      // Combinación anterior (ya no la admite el servidor): manda el rol de Ventario.
+      expect(u.rolCuenta, RolCuenta.vendedor);
     });
 
-    test('sin rol en Inventario queda null, no un rol por defecto', () {
+    test('sin rol en Inventario queda null; OPERADOR y GENERAL son el operario', () {
       final u = Usuario.desdeJson({
         'id': 1, 'nombre': 'Kiosco', 'email': 'k@ej.co', 'rol_asistencia': 'OPERADOR', 'rol_inventario': null,
+        'pausa_asistencia': true,
       });
       expect(u.rolInventario, isNull);
-      expect(u.rol, Rol.general);
+      expect(u.rolAsistencia, RolAsistencia.operario);
+      expect(u.rolCuenta, RolCuenta.operario);
+      expect(u.pausaAsistencia, isTrue);
+      expect(RolAsistencia.desdeApi('GENERAL'), RolAsistencia.operario);
+    });
+
+    test('el rol único decide a qué app entra la cuenta', () {
+      expect(RolCuenta.admin.enLasDos, isTrue);
+      expect(RolCuenta.gerente.enLasDos, isTrue);
+      expect(RolCuenta.vendedor.soloVentario, isTrue);
+      expect(RolCuenta.auxiliar.unaSede, isTrue);
+      expect(RolCuenta.talentoHumano.soloPresente, isTrue);
+      expect(RolCuenta.operario.conSedes, isFalse);
+      expect(RolCuenta.de(RolAsistencia.admin, RolInventario.admin), RolCuenta.admin);
+      expect(RolCuenta.de(RolAsistencia.talentoHumano, null), RolCuenta.talentoHumano);
+      expect(RolCuenta.de(null, RolInventario.vendedor), RolCuenta.vendedor);
+      expect(RolCuenta.de(null, null), isNull);
+    });
+
+    test('la sesión del operario no entra al panel', () {
+      SesionAdmin sesion(String rol, String rolAsis) => SesionAdmin(
+            token: 't',
+            nombre: 'x',
+            rol: Rol.desdeApi(rol),
+            rolAsistencia: RolAsistencia.desdeApi(rolAsis),
+            expira: DateTime.now().add(const Duration(hours: 1)),
+          );
+      expect(sesion('GENERAL', 'OPERARIO').esOperario, isTrue);
+      expect(sesion('GENERAL', 'OPERARIO').esAdministrativo, isFalse);
+      expect(sesion('ADMINISTRATIVO', 'TALENTO_HUMANO').esAdministrativo, isTrue);
+      expect(sesion('ADMINISTRATIVO', 'TALENTO_HUMANO').esTalentoHumano, isTrue);
+      expect(sesion('ADMINISTRATIVO', 'TALENTO_HUMANO').esAdminEmpresa, isFalse);
+    });
+  });
+
+  group('Planes por app', () {
+    test('Mi empresa trae el plan de cada app', () {
+      final e = EmpresaInfo.desdeJson({
+        'empresa': {'uuid': 'u', 'nombre': 'Tienda'},
+        'plan': {..._planGratisLleno, 'aplicativo': 'ASISTENCIA'},
+        'planes': {
+          'ASISTENCIA': {..._planGratisLleno, 'aplicativo': 'ASISTENCIA'},
+          'INVENTARIO': {..._planGratisLleno, 'aplicativo': 'INVENTARIO', 'codigo': 'ILIMITADO', 'nombre': 'Ilimitado'},
+        },
+        'aplicativos': ['ASISTENCIA', 'INVENTARIO'],
+      });
+      expect(e.plan!.esPresente, isTrue);
+      expect(e.plan!.recursos, isNot(contains(RecursoLimitado.productos)));
+      expect(e.planVentario!.nombreApp, 'Ventario');
+      expect(e.planVentario!.esGratis, isFalse);
+      expect(e.planVentario!.recursos, contains(RecursoLimitado.productos));
+    });
+
+    test('las sedes dicen en qué app se usan', () {
+      final s = Sede.desdeJson({'id': 3, 'nombre': 'Norte', 'codigo': 'NOR', 'elegida': false, 'elegida_ventario': true});
+      expect(s.elegida, isFalse);
+      expect(s.elegidaVentario, isTrue);
+      expect(Sede.desdeJson({'id': 1, 'nombre': 'Centro'}).elegida, isTrue);
+    });
+
+    test('las personas en pausa se reconocen', () {
+      final e = Empleado.desdeJson({'id': 1, 'sede_id': 1, 'documento': '1', 'nombre': 'Luz', 'en_pausa': true});
+      expect(e.enPausa, isTrue);
     });
   });
 

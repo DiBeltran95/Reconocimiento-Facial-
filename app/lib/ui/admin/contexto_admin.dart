@@ -6,13 +6,15 @@ import '../../data/modelos.dart';
 /// Estado compartido por las pestañas del panel: sedes visibles, la elegida
 /// y el catálogo de turnos.
 class ContextoAdmin extends ChangeNotifier {
-  ContextoAdmin({required this.api, required Sede sedeDispositivo})
-      : sede = sedeDispositivo,
-        sedes = [sedeDispositivo],
-        sedeDispositivo = sedeDispositivo;
+  /// [sedes] no puede venir vacía. [sedeDispositivo]: la sede de este teléfono
+  /// si es punto de marcación (se elige primero).
+  ContextoAdmin({required this.api, required List<Sede> sedes, this.sedeDispositivo})
+      : assert(sedes.isNotEmpty),
+        sedes = sedes,
+        sede = sedes.firstWhere((s) => s.id == sedeDispositivo?.id, orElse: () => sedes.first);
 
   final Api api;
-  final Sede sedeDispositivo;
+  final Sede? sedeDispositivo;
   List<Sede> sedes;
   Sede sede;
   String? error;

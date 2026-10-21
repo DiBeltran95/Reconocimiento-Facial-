@@ -22,6 +22,8 @@ class Sede {
     this.telefono,
     this.esPrincipal = false,
     this.activo = true,
+    this.elegida = true,
+    this.elegidaVentario,
   });
 
   final int id;
@@ -32,6 +34,13 @@ class Sede {
   final bool esPrincipal;
   final bool activo;
 
+  /// ¿Presente trabaja en esta sede? Las sedes son de la empresa (compartidas
+  /// con Ventario) y cada app usa solo las que se eligen para ella.
+  final bool elegida;
+
+  /// ¿La usa Ventario? Solo viene en el listado completo del administrador.
+  final bool? elegidaVentario;
+
   factory Sede.desdeJson(Map<String, dynamic> j) => Sede(
         id: (j['id'] as num).toInt(),
         nombre: j['nombre'] as String,
@@ -40,6 +49,8 @@ class Sede {
         telefono: j['telefono'] as String?,
         esPrincipal: j['es_principal'] as bool? ?? false,
         activo: j['activo'] as bool? ?? true,
+        elegida: j['elegida'] as bool? ?? true,
+        elegidaVentario: j['elegida_ventario'] as bool?,
       );
 
   Map<String, dynamic> aJson() => {'id': id, 'nombre': nombre, 'codigo': codigo, 'direccion': direccion};
@@ -111,6 +122,7 @@ class Empleado {
     this.consentimientoEn,
     this.cuentaEmail,
     this.cuentaActiva = true,
+    this.enPausa = false,
   });
 
   final int id;
@@ -131,6 +143,10 @@ class Empleado {
   final String? cuentaEmail;
   final bool cuentaActiva;
 
+  /// En pausa porque el plan de Presente no alcanza para todos: no marca ni
+  /// cuenta en el cupo hasta que el administrador la reactive.
+  final bool enPausa;
+
   bool get tieneRostro => fotos.isNotEmpty;
   bool get tieneConsentimiento => consentimientoEn != null;
 
@@ -150,6 +166,7 @@ class Empleado {
       consentimientoEn: j['consentimiento_en'] == null ? null : DateTime.parse(j['consentimiento_en'] as String),
       cuentaEmail: cuenta?['email'] as String?,
       cuentaActiva: cuenta?['activa'] as bool? ?? true,
+      enPausa: j['en_pausa'] as bool? ?? false,
     );
   }
 }
@@ -247,18 +264,56 @@ enum Rol {
   static Rol desdeApi(String? v) => v == 'ADMINISTRATIVO' ? administrativo : general;
 }
 
-/// Rol de la cuenta en Control de Personal (la misma cuenta tiene otro en Inventario).
+/// Rol de la cuenta en Presente (la misma cuenta puede tener otro en Ventario).
 enum RolAsistencia {
   admin('ADMIN', 'Administrador', 'Todo en la empresa: sedes, equipo, horarios y reportes'),
   gerente('GERENTE', 'Gerente', 'Personal, horarios y reportes de sus sedes'),
-  operador('OPERADOR', 'Operador de kioscos', 'Vincula y atiende los kioscos');
+  talentoHumano('TALENTO_HUMANO', 'Talento humano', 'Personal, rostros, turnos, reportes y teléfonos de todas las sedes'),
+  operario('OPERARIO', 'Operario', 'Cuenta de los teléfonos de marcación: una para todas las sedes');
 
   const RolAsistencia(this.api, this.etiqueta, this.descripcion);
   final String api;
   final String etiqueta;
   final String descripcion;
 
-  static RolAsistencia? desdeApi(String? v) => values.where((r) => r.api == v).firstOrNull;
+  /// GENERAL y OPERADOR son los nombres anteriores del operario.
+  static RolAsistencia? desdeApi(String? v) => switch (v) {
+        'GENERAL' || 'OPERADOR' => operario,
+        _ => values.where((r) => r.api == v).firstOrNull,
+      };
+}
+
+/// Rol único de una cuenta en la plataforma: decide a qué app entra y con qué
+/// permisos. Administrador y gerente están en las dos; los demás, en una sola.
+enum RolCuenta {
+  admin('Administrador', 'Todo en la empresa, en las dos apps', RolAsistencia.admin, RolInventario.admin),
+  gerente('Gerente', 'Sus sedes, en las dos apps', RolAsistencia.gerente, RolInventario.gerente),
+  vendedor('Vendedor', 'Vende en su sede', null, RolInventario.vendedor),
+  auxiliar('Auxiliar de inventario', 'Registra entradas en su sede', null, RolInventario.auxiliar),
+  talentoHumano('Talento humano', 'Personal, rostros, turnos y reportes de todas las sedes', RolAsistencia.talentoHumano, null),
+  operario('Operario', 'Deja los teléfonos de marcación listos: una cuenta para todas las sedes', RolAsistencia.operario, null);
+
+  const RolCuenta(this.etiqueta, this.descripcion, this.asistencia, this.inventario);
+  final String etiqueta;
+  final String descripcion;
+  final RolAsistencia? asistencia;
+  final RolInventario? inventario;
+
+  bool get enLasDos => asistencia != null && inventario != null;
+  bool get soloVentario => asistencia == null;
+  bool get soloPresente => inventario == null;
+
+  /// Vendedor y auxiliar trabajan en una sede; el gerente, en las suyas.
+  bool get unaSede => inventario?.unaSede ?? false;
+  bool get conSedes => this == gerente || unaSede;
+
+  static RolCuenta? de(RolAsistencia? asistencia, RolInventario? inventario) {
+    if (inventario != null) {
+      return values.where((r) => r.inventario == inventario).firstOrNull;
+    }
+    return values.where((r) => r.asistencia == asistencia && r.inventario == null).firstOrNull ??
+        values.where((r) => r.asistencia == asistencia && asistencia != null).firstOrNull;
+  }
 }
 
 /// Rol de la cuenta en la app de Inventario POS.
@@ -307,7 +362,14 @@ class SesionAdmin {
   final DateTime expira;
 
   bool get vigente => DateTime.now().isBefore(expira);
-  bool get esAdministrativo => rol == Rol.administrativo;
+
+  /// Entra al panel: administrador, gerente o talento humano.
+  bool get esAdministrativo => rol == Rol.administrativo && !esOperario;
+
+  /// La cuenta de los teléfonos de marcación: solo los vincula.
+  bool get esOperario => rolAsistencia == RolAsistencia.operario || rol == Rol.general;
+
+  bool get esTalentoHumano => rolAsistencia == RolAsistencia.talentoHumano;
 
   /// Dueño de la empresa: sedes, cuentas, turnos y datos de la empresa.
   bool get esAdminEmpresa => rolAsistencia == RolAsistencia.admin;
@@ -348,7 +410,8 @@ enum RecursoLimitado {
   static RecursoLimitado? desdeApi(String? v) => values.where((r) => r.api == v).firstOrNull;
 }
 
-/// Plan vigente de la empresa y su uso.
+/// Plan vigente de una app de la empresa y su uso. Cada app tiene el suyo:
+/// pagar Ventario no cambia el de Presente.
 class PlanEmpresa {
   const PlanEmpresa({
     required this.codigo,
@@ -358,8 +421,11 @@ class PlanEmpresa {
     required this.productos,
     this.vence,
     this.vencido = false,
+    this.aplicativo = 'ASISTENCIA',
   });
 
+  /// ASISTENCIA (Presente) o INVENTARIO (Ventario).
+  final String aplicativo;
   final String codigo;
   final String nombre;
   final DateTime? vence;
@@ -369,6 +435,12 @@ class PlanEmpresa {
   final RecursoPlan productos;
 
   bool get esGratis => codigo == 'GRATIS';
+  bool get esPresente => aplicativo == 'ASISTENCIA';
+  String get nombreApp => esPresente ? 'Presente' : 'Ventario';
+
+  /// Los productos solo existen en Ventario.
+  List<RecursoLimitado> get recursos =>
+      esPresente ? const [RecursoLimitado.sedes, RecursoLimitado.personas] : RecursoLimitado.values;
 
   RecursoPlan de(RecursoLimitado r) => switch (r) {
         RecursoLimitado.sedes => sedes,
@@ -379,6 +451,7 @@ class PlanEmpresa {
   static PlanEmpresa? desdeJson(Map<String, dynamic>? j) => j == null
       ? null
       : PlanEmpresa(
+          aplicativo: (j['aplicativo'] as String?) ?? 'ASISTENCIA',
           codigo: j['codigo'] as String,
           nombre: j['nombre'] as String,
           vence: j['vence'] == null ? null : DateTime.parse(j['vence'] as String),
@@ -398,6 +471,7 @@ class EmpresaInfo {
     this.telefono,
     this.email,
     this.plan,
+    this.planVentario,
     this.aplicativos = const [],
   });
 
@@ -406,14 +480,19 @@ class EmpresaInfo {
   final String? nit;
   final String? telefono;
   final String? email;
+
+  /// Plan de Presente (esta app) y de Ventario: cada app tiene el suyo.
   final PlanEmpresa? plan;
+  final PlanEmpresa? planVentario;
   final List<String> aplicativos;
 
   bool get tieneInventario => aplicativos.contains('INVENTARIO');
 
   factory EmpresaInfo.desdeJson(Map<String, dynamic> j) {
     final e = j['empresa'] as Map<String, dynamic>;
+    final planes = j['planes'] as Map<String, dynamic>?;
     return EmpresaInfo(
+      planVentario: PlanEmpresa.desdeJson(planes?['INVENTARIO'] as Map<String, dynamic>?),
       uuid: e['uuid'] as String,
       nombre: e['nombre'] as String,
       nit: e['nit'] as String?,
@@ -436,6 +515,7 @@ class Usuario {
     this.rolInventario,
     this.sedes = const [],
     this.documento,
+    this.pausaAsistencia = false,
   });
   final int id;
   final String nombre;
@@ -446,8 +526,10 @@ class Usuario {
   final String? documento;
   final bool activo;
 
-  /// Nivel de acceso en esta app (compatibilidad con el kiosco).
-  Rol get rol => rolAsistencia == RolAsistencia.operador ? Rol.general : Rol.administrativo;
+  /// En pausa en Presente porque el plan no alcanza para todos.
+  final bool pausaAsistencia;
+
+  RolCuenta? get rolCuenta => RolCuenta.de(rolAsistencia, rolInventario);
 
   factory Usuario.desdeJson(Map<String, dynamic> j) => Usuario(
         id: (j['id'] as num).toInt(),
@@ -458,6 +540,7 @@ class Usuario {
         sedes: ((j['sedes'] as List?) ?? const []).map((s) => (s as num).toInt()).toList(),
         documento: j['documento'] as String?,
         activo: j['activo'] as bool? ?? true,
+        pausaAsistencia: j['pausa_asistencia'] as bool? ?? false,
       );
 }
 
@@ -469,20 +552,34 @@ class EquipoEmpresa {
   final PlanEmpresa? plan;
 }
 
+/// Teléfono de marcación. El [codigo] corto se ve en su pantalla: así se sabe
+/// qué aparato físico es cuál cuando todos son del mismo modelo.
 class KioscoRegistrado {
-  const KioscoRegistrado({required this.id, required this.nombre, required this.sedeId, required this.sede, this.ultimoSync});
+  const KioscoRegistrado({
+    required this.id,
+    required this.nombre,
+    required this.sedeId,
+    required this.sede,
+    this.codigo,
+    this.ultimoSync,
+    this.vinculadoPor,
+  });
   final int id;
   final String nombre;
   final int sedeId;
   final String sede;
+  final String? codigo;
   final DateTime? ultimoSync;
+  final String? vinculadoPor;
 
   factory KioscoRegistrado.desdeJson(Map<String, dynamic> j) => KioscoRegistrado(
         id: (j['id'] as num).toInt(),
         nombre: j['nombre'] as String,
         sedeId: (j['sede_id'] as num).toInt(),
         sede: j['sede'] as String,
+        codigo: j['codigo'] as String?,
         ultimoSync: j['ultimo_sync'] == null ? null : DateTime.parse(j['ultimo_sync'] as String),
+        vinculadoPor: j['vinculado_por'] as String?,
       );
 }
 
@@ -803,11 +900,18 @@ class ReporteCumplimiento {
 }
 
 class DispositivoRegistrado {
-  const DispositivoRegistrado({required this.id, required this.nombre, required this.token, required this.sede});
+  const DispositivoRegistrado({
+    required this.id,
+    required this.nombre,
+    required this.token,
+    required this.sede,
+    this.codigo,
+  });
   final int id;
   final String nombre;
   final String token;
   final Sede sede;
+  final String? codigo;
 }
 
 // ---------------------------------------------------------------------------

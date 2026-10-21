@@ -13,12 +13,15 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 const estado = { token: null, planes: [], empresas: [], empresaEditada: null, planEditado: null };
 
-const NOMBRE_APP = { INVENTARIO: 'Inventario', ASISTENCIA: 'Personal' };
+const NOMBRE_APP = { INVENTARIO: 'Ventario', ASISTENCIA: 'Presente' };
+const APPS = ['INVENTARIO', 'ASISTENCIA'];
 const RECURSOS = [
   ['sedes', 'Sedes'],
   ['personas', 'Personas'],
   ['productos', 'Productos'],
 ];
+// Presente no maneja productos: su medidor no aplica.
+const recursosDe = (app) => RECURSOS.filter(([k]) => app === 'INVENTARIO' || k !== 'productos');
 
 // ------------------------------------------------------------------ utilidades
 
@@ -205,7 +208,7 @@ async function cargarEmpresas() {
     const { empresas } = await api(`/plataforma/empresas?${q}`);
     estado.empresas = empresas;
     $('#lista-empresas').replaceChildren(...(empresas.length ? empresas.map(filaEmpresa) : [
-      el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'vacio' }, el('strong', {}, 'Sin resultados'), 'Prueba con otro nombre, estado o plan.'))),
+      el('tr', {}, el('td', { colspan: 4 }, el('div', { class: 'vacio' }, el('strong', {}, 'Sin resultados'), 'Prueba con otro nombre, estado o plan.'))),
     ]));
   } catch (e) {
     if (e.status !== 401) avisar(e.message, true);
@@ -218,16 +221,21 @@ function filaEmpresa(e) {
     el('td', {},
       el('div', { class: 'empresa__nombre' }, e.nombre),
       el('div', { class: 'empresa__sub' }, [e.email_contacto, e.nit && `NIT ${e.nit}`, `desde ${fechaCorta(e.creada)}`].filter(Boolean).join(' · '))),
-    el('td', {},
-      el('span', { class: 'pildora', style: `--c: var(${e.plan.codigo === 'GRATIS' ? '--texto-suave' : '--primario'})` }, e.plan.nombre),
-      e.plan.vencido && el('div', { class: 'empresa__sub' }, 'Vencido: opera como Gratis'),
-      !e.plan.vencido && e.plan.vence && el('div', { class: 'empresa__sub' }, `Vence ${fechaCorta(e.plan.vence)}`)),
-    el('td', {}, el('div', { class: 'medidores' }, RECURSOS.map(([k, n]) => medidor(n, e.uso[k])))),
-    el('td', {}, el('div', { class: 'chips' }, e.apps.length
-      ? e.apps.map((a) => el('span', { class: 'pildora pildora--icono', style: '--c: var(--secundario)' }, NOMBRE_APP[a] ?? a))
-      : el('span', { class: 'suave' }, 'Ninguna'))),
+    ...APPS.map((app) => celdaApp(app, e.aplicativos[app])),
     el('td', {}, el('span', { class: 'pildora', style: `--c: var(${e.estado === 'ACTIVA' ? '--entrada' : '--peligro'})` },
       e.estado === 'ACTIVA' ? 'Activa' : 'Suspendida')));
+}
+
+/** Plan, vencimiento y uso de una app de la empresa. */
+function celdaApp(app, a) {
+  if (!a) return el('td', {}, el('span', { class: 'suave' }, 'Sin datos'));
+  const { plan } = a;
+  return el('td', {},
+    el('span', { class: 'pildora', style: `--c: var(${!a.activa ? '--peligro' : plan.codigo === 'GRATIS' ? '--texto-suave' : '--primario'})` },
+      a.activa ? plan.nombre : `${plan.nombre} · deshabilitada`),
+    plan.vencido && el('div', { class: 'empresa__sub' }, 'Vencido: opera como Gratis'),
+    !plan.vencido && plan.vence && el('div', { class: 'empresa__sub' }, `Vence ${fechaCorta(plan.vence)}`),
+    el('div', { class: 'medidores' }, recursosDe(app).map(([k, n]) => medidor(n, a.uso[k]))));
 }
 
 function abrirEmpresa(e) {
@@ -236,13 +244,17 @@ function abrirEmpresa(e) {
   f.reset();
   $('#dlg-empresa-titulo').textContent = e.nombre;
   $('#dlg-empresa-contacto').textContent = [e.email_contacto, e.telefono].filter(Boolean).join(' · ');
-  $('#dlg-empresa-uso').replaceChildren(...RECURSOS.map(([k, n]) => medidor(n, e.uso[k])));
-  f.plan_id.replaceChildren(...estado.planes.filter((p) => p.activo || p.id === e.plan.id).map((p) =>
-    el('option', { value: p.id }, `${p.nombre} · ${limiteTxt(p.max_sedes)} sedes, ${limiteTxt(p.max_personas)} personas, ${limiteTxt(p.max_productos)} productos`)));
-  f.plan_id.value = String(e.plan.id);
-  f.plan_vence.value = e.plan.vence ?? '';
-  f.app_INVENTARIO.checked = e.apps.includes('INVENTARIO');
-  f.app_ASISTENCIA.checked = e.apps.includes('ASISTENCIA');
+  for (const app of APPS) {
+    const a = e.aplicativos[app];
+    $(`#dlg-uso-${app}`).replaceChildren(...(a ? recursosDe(app).map(([k, n]) => medidor(n, a.uso[k])) : []));
+    const select = f[`plan_${app}`];
+    select.replaceChildren(...estado.planes
+      .filter((p) => (p.aplicativo == null || p.aplicativo === app) && (p.activo || p.id === a?.plan.id))
+      .map((p) => el('option', { value: p.id }, `${p.nombre} · ${limiteTxt(p.max_sedes)} sedes, ${limiteTxt(p.max_personas)} personas${app === 'INVENTARIO' ? `, ${limiteTxt(p.max_productos)} productos` : ''}`)));
+    if (a) select.value = String(a.plan.id);
+    f[`vence_${app}`].value = a?.plan.vence ?? '';
+    f[`app_${app}`].checked = e.apps.includes(app);
+  }
   f.suspendida.checked = e.estado === 'SUSPENDIDA';
   f.notas.value = e.notas ?? '';
   mostrarError('#empresa-error');
@@ -260,8 +272,7 @@ cancelable($('#form-empresa'), async (ev) => {
     const { empresa } = await api(`/plataforma/empresas/${e.id}`, {
       metodo: 'PUT',
       cuerpo: {
-        plan_id: Number(f.plan_id.value),
-        plan_vence: f.plan_vence.value || null,
+        planes: Object.fromEntries(APPS.map((app) => [app, { plan_id: Number(f[`plan_${app}`].value), plan_vence: f[`vence_${app}`].value || null }])),
         estado: f.suspendida.checked ? 'SUSPENDIDA' : 'ACTIVA',
         apps: { INVENTARIO: f.app_INVENTARIO.checked, ASISTENCIA: f.app_ASISTENCIA.checked },
         notas: f.notas.value,
@@ -294,6 +305,7 @@ function tarjetaPlan(p) {
     el('div', { class: 'plan-tarjeta__cab' },
       el('h3', {}, p.nombre),
       el('span', { class: 'pildora', style: `--c: var(${p.activo ? '--entrada' : '--texto-suave'})` }, p.activo ? `${p.empresas} empresa${p.empresas === 1 ? '' : 's'}` : 'No disponible')),
+    el('p', { class: 'suave' }, p.aplicativo ? `Solo ${NOMBRE_APP[p.aplicativo]}` : 'Ventario y Presente'),
     p.descripcion && el('p', {}, p.descripcion),
     el('dl', {},
       ...RECURSOS.map(([k, n]) => el('div', {}, el('dt', {}, n), el('dd', {}, limiteTxt(p[`max_${k}`]))))));
@@ -308,6 +320,8 @@ function abrirPlan(p) {
   f.codigo.disabled = Boolean(p);
   f.nombre.value = p?.nombre ?? '';
   f.descripcion.value = p?.descripcion ?? '';
+  f.aplicativo.value = p?.aplicativo ?? '';
+  f.aplicativo.disabled = p?.codigo === 'GRATIS';
   for (const [k] of RECURSOS) f[`max_${k}`].value = p?.[`max_${k}`] ?? '';
   f.orden.value = p?.orden ?? 10;
   $('#fila-plan-activo').hidden = !p;
@@ -323,6 +337,7 @@ cancelable($('#form-plan'), async (ev) => {
   const cuerpo = {
     nombre: f.nombre.value,
     descripcion: f.descripcion.value,
+    aplicativo: f.aplicativo.value || null,
     max_sedes: f.max_sedes.value || null,
     max_personas: f.max_personas.value || null,
     max_productos: f.max_productos.value || null,

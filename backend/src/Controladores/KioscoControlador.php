@@ -33,7 +33,7 @@ final class KioscoControlador
         $filas = Db::filas(
             'SELECT e.id, e.documento, e.nombre, e.cargo FROM asis_empleados e
                LEFT JOIN usuarios u ON u.id = e.usuario_id
-              WHERE e.sede_id = ? AND e.activo = 1
+              WHERE e.sede_id = ? AND e.activo = 1 AND e.en_pausa = 0
                 AND (e.usuario_id IS NULL OR (u.activo = 1 AND u.deleted_at IS NULL))
               ORDER BY e.nombre',
             [$disp['sede_id']],

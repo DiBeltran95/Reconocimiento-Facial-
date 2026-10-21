@@ -93,7 +93,7 @@
       <div class="tabla-envoltura">
         <table class="tabla">
           <thead>
-            <tr><th scope="col">Empresa</th><th scope="col">Plan</th><th scope="col">Uso</th><th scope="col">Apps</th><th scope="col">Estado</th></tr>
+            <tr><th scope="col">Empresa</th><th scope="col">Ventario</th><th scope="col">Presente</th><th scope="col">Estado</th></tr>
           </thead>
           <tbody id="lista-empresas"></tbody>
         </table>
@@ -126,19 +126,25 @@
         <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
       </header>
       <div class="dialogo__cuerpo">
-        <div class="uso" id="dlg-empresa-uso"></div>
-        <div class="dos-columnas">
-          <label class="campo"><span>Plan</span><select name="plan_id" required></select></label>
-          <label class="campo">
-            <span>Vence <em>(vacío = no vence)</em></span>
-            <input name="plan_vence" type="date">
-          </label>
-        </div>
         <fieldset class="rostro">
-          <legend>Apps habilitadas</legend>
-          <label class="check"><input type="checkbox" name="app_INVENTARIO"><span><strong>Inventario POS</strong> · ventas, stock y caja</span></label>
-          <label class="check"><input type="checkbox" name="app_ASISTENCIA"><span><strong>Control de Personal</strong> · asistencia con reconocimiento facial</span></label>
+          <legend>Ventario · ventas, stock y caja</legend>
+          <div class="uso" id="dlg-uso-INVENTARIO"></div>
+          <div class="dos-columnas">
+            <label class="campo"><span>Plan</span><select name="plan_INVENTARIO" required></select></label>
+            <label class="campo"><span>Vence <em>(vacío = no vence)</em></span><input name="vence_INVENTARIO" type="date"></label>
+          </div>
+          <label class="check"><input type="checkbox" name="app_INVENTARIO"><span>App habilitada</span></label>
         </fieldset>
+        <fieldset class="rostro">
+          <legend>Presente · asistencia con reconocimiento facial</legend>
+          <div class="uso" id="dlg-uso-ASISTENCIA"></div>
+          <div class="dos-columnas">
+            <label class="campo"><span>Plan</span><select name="plan_ASISTENCIA" required></select></label>
+            <label class="campo"><span>Vence <em>(vacío = no vence)</em></span><input name="vence_ASISTENCIA" type="date"></label>
+          </div>
+          <label class="check"><input type="checkbox" name="app_ASISTENCIA"><span>App habilitada</span></label>
+        </fieldset>
+        <p class="suave">Si un plan baja o vence, lo que sobre queda en pausa (nunca el administrador).</p>
         <label class="check check--peligro">
           <input type="checkbox" name="suspendida">
           <span><strong>Suspender empresa</strong> · nadie de ella puede entrar a las apps</span>
@@ -169,6 +175,13 @@
           <label class="campo"><span>Nombre</span><input name="nombre" required maxlength="60" placeholder="Pyme"></label>
         </div>
         <label class="campo"><span>Descripción</span><input name="descripcion" maxlength="255" placeholder="Para negocios con varias sedes"></label>
+        <label class="campo"><span>App</span>
+          <select name="aplicativo">
+            <option value="">Las dos apps</option>
+            <option value="INVENTARIO">Solo Ventario</option>
+            <option value="ASISTENCIA">Solo Presente</option>
+          </select>
+        </label>
         <div class="tres-columnas">
           <label class="campo"><span>Sedes</span><input name="max_sedes" type="number" min="1" inputmode="numeric" placeholder="Sin límite"></label>
           <label class="campo"><span>Personas</span><input name="max_personas" type="number" min="1" inputmode="numeric" placeholder="Sin límite"></label>

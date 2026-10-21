@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Diferencias que deja `flutter test test_capturas` cuando una captura no coincide
+test_capturas/failures/

@@ -13,13 +13,14 @@ use App\Servicios\Plan;
 
 /**
  * Cuentas de la empresa. Una cuenta es UNA persona para las dos apps, con un
- * rol en cada una:
- *   rol_asistencia  ADMIN / GERENTE / OPERADOR  (null = no entra aquí)
- *   rol_inventario  ADMIN / GERENTE / AUXILIAR_INVENTARIO / VENDEDOR (null = no
- *                   entra a Inventario; solo se ofrece si la empresa lo tiene)
+ * rol coherente por app (la base lo exige con ck_usuarios_roles):
+ *   ADMIN, GERENTE                 → el mismo en Ventario y en Presente
+ *   AUXILIAR_INVENTARIO, VENDEDOR  → solo Ventario
+ *   TALENTO_HUMANO, OPERARIO       → solo Presente (de todas las sedes)
  * Las sedes (usuario_sedes) son las mismas en las dos apps. Inactivar una
- * cuenta la saca de las dos. Las reglas son las de Inventario
- * (domain/alcance.js · validarSedesDeRol). Solo el administrador las gestiona.
+ * cuenta la saca de las dos. Las reglas son las de Ventario
+ * (domain/alcance.js · normalizarRoles y validarSedesDeRol). Solo el
+ * administrador las gestiona.
  */
 final class UsuariosControlador
 {
@@ -29,7 +30,8 @@ final class UsuariosControlador
     {
         $admin = Auth::adminEmpresa($req);
         $filas = Db::filas(
-            "SELECT u.id, u.uuid, u.nombre, u.documento, u.email, u.rol, u.rol_asistencia, u.activo, u.created_at,
+            "SELECT u.id, u.uuid, u.nombre, u.documento, u.email, u.rol, u.rol_asistencia, u.activo,
+                    u.pausa_asistencia, u.created_at,
                     GROUP_CONCAT(us.sede_id ORDER BY us.sede_id) AS sedes
                FROM usuarios u
                LEFT JOIN usuario_sedes us ON us.usuario_id = u.id
@@ -42,7 +44,24 @@ final class UsuariosControlador
             'usuarios'    => array_map([self::class, 'aJson'], $filas),
             'aplicativos' => Plan::aplicativos($admin['empresa_id']),
             'plan'        => Plan::deEmpresa($admin['empresa_id']),
+            'planes'      => Plan::planes($admin['empresa_id']),
         ]);
+    }
+
+    /**
+     * Pausa o reactiva una cuenta en Presente (el plan no alcanza para todos).
+     * Reactivar exige cupo: LIMITE_PLAN → 409. Al administrador no se le pausa.
+     */
+    public static function pausar(Request $req): never
+    {
+        $yo = Auth::adminEmpresa($req);
+        $u = self::buscar($req->param('id'), $yo);
+        $pausada = (bool) ($req->json()['pausada'] ?? true);
+        if ($pausada && $u['rol_asistencia'] === Auth::ROL_ADMIN) {
+            throw HttpError::validacion('Al administrador no se le pausa');
+        }
+        Db::query('UPDATE usuarios SET pausa_asistencia = ? WHERE id = ?', [$pausada ? 1 : 0, $u['id']]);
+        Response::json(['usuario' => self::aJson(self::buscar((int) $u['id'], $yo))]);
     }
 
     public static function crear(Request $req): never
@@ -52,8 +71,10 @@ final class UsuariosControlador
         $nombre = self::validarNombre($d['nombre'] ?? '');
         $email = self::validarEmail($d['email'] ?? $d['usuario'] ?? '');
         $password = self::validarPassword($d['password'] ?? '');
-        $rolAsis = self::validarRolAsistencia($d['rol_asistencia'] ?? self::rolLegado($d['rol'] ?? null));
-        $rolInv = self::validarRolInventario($d['rol_inventario'] ?? null, $admin['empresa_id']);
+        [$rolInv, $rolAsis] = self::normalizar(
+            self::validarRolInventario($d['rol_inventario'] ?? null),
+            self::validarRolAsistencia($d['rol_asistencia'] ?? self::rolLegado($d['rol'] ?? null)),
+        );
         $sedes = self::validarSedes($d['sedes'] ?? [], $admin);
         self::validarCombinacion($rolInv, $rolAsis, $sedes);
         $documento = self::validarDocumento($d['documento'] ?? null);
@@ -109,8 +130,20 @@ final class UsuariosControlador
             ? self::validarRolAsistencia($d['rol_asistencia'] ?? self::rolLegado($d['rol'] ?? null))
             : $actual['rol_asistencia'];
         $rolInv = array_key_exists('rol_inventario', $d)
-            ? self::validarRolInventario($d['rol_inventario'], $yo['empresa_id'])
+            ? self::validarRolInventario($d['rol_inventario'])
             : $actual['rol'];
+        // Coherencia por app: si cambió el de Presente a uno de las dos apps (o
+        // a uno solo de Presente), el de Ventario se ajusta, y viceversa.
+        if (array_key_exists('rol_asistencia', $d) && !array_key_exists('rol_inventario', $d)) {
+            $rolInv = in_array($rolAsis, [Auth::ROL_ADMIN, Auth::ROL_GERENTE], true) ? $rolAsis
+                : (in_array($rolAsis, [Auth::ROL_TALENTO_HUMANO, Auth::ROL_OPERARIO], true) ? null
+                : (in_array($actual['rol'], ['ADMIN', 'GERENTE'], true) ? null : $actual['rol']));
+        } elseif (array_key_exists('rol_inventario', $d) && !array_key_exists('rol_asistencia', $d) && !array_key_exists('rol', $d)) {
+            $rolAsis = in_array($rolInv, ['ADMIN', 'GERENTE'], true) ? $rolInv
+                : ($rolInv !== null ? null
+                : (in_array($actual['rol_asistencia'], [Auth::ROL_TALENTO_HUMANO, Auth::ROL_OPERARIO], true) ? $actual['rol_asistencia'] : null));
+        }
+        [$rolInv, $rolAsis] = self::normalizar($rolInv, $rolAsis);
         $activo = array_key_exists('activo', $d) ? ((bool) $d['activo'] ? 1 : 0) : (int) $actual['activo'];
         $sedes = array_key_exists('sedes', $d) ? self::validarSedes($d['sedes'], $yo) : self::sedesDe((int) $actual['id']);
         $documento = array_key_exists('documento', $d) ? self::validarDocumento($d['documento']) : $actual['documento'];
@@ -172,18 +205,19 @@ final class UsuariosControlador
             // Compatibilidad con la app anterior (GENERAL / ADMINISTRATIVO).
             'usuario'        => $u['email'],
             'rol'            => $u['rol_asistencia'] === null ? null
-                : ($u['rol_asistencia'] === Auth::ROL_OPERADOR ? Auth::GENERAL : Auth::ADMINISTRATIVO),
+                : ($u['rol_asistencia'] === Auth::ROL_OPERARIO ? Auth::GENERAL : Auth::ADMINISTRATIVO),
             'rol_asistencia' => $u['rol_asistencia'],
             'rol_inventario' => $u['rol'],
             'sedes'          => $sedes,
             'activo'         => (int) $u['activo'] === 1,
+            'pausa_asistencia' => (int) ($u['pausa_asistencia'] ?? 0) === 1,
         ];
     }
 
     private static function buscar(int $id, array $admin): array
     {
         $u = Db::fila(
-            'SELECT id, uuid, nombre, documento, email, rol, rol_asistencia, activo
+            'SELECT id, uuid, nombre, documento, email, rol, rol_asistencia, activo, pausa_asistencia
                FROM usuarios WHERE id = ? AND empresa_id = ? AND deleted_at IS NULL',
             [$id, $admin['empresa_id']],
         ) ?? throw HttpError::noEncontrado('Usuario');
@@ -210,11 +244,12 @@ final class UsuariosControlador
         Db::query('UPDATE usuarios SET updated_at = UTC_TIMESTAMP(3) WHERE id = ?', [$usuarioId]);
     }
 
-    /** Roles de la app anterior → rol de Control de Personal. */
+    /** Roles de la app anterior → rol de Presente. */
     private static function rolLegado(mixed $rol): mixed
     {
         return match ($rol) {
-            Auth::GENERAL        => Auth::ROL_OPERADOR,
+            Auth::GENERAL        => Auth::ROL_OPERARIO,
+            'OPERADOR'           => Auth::ROL_OPERARIO,
             Auth::ADMINISTRATIVO => Auth::ROL_ADMIN,
             default              => $rol,
         };
@@ -226,23 +261,46 @@ final class UsuariosControlador
             return null;
         }
         if (!in_array($v, Auth::ROLES_ASISTENCIA, true)) {
-            throw HttpError::validacion('Rol de Control de Personal inválido', 'rol_asistencia');
+            throw HttpError::validacion('Rol de Presente inválido', 'rol_asistencia');
         }
         return $v;
     }
 
-    private static function validarRolInventario(mixed $v, int $empresaId): ?string
+    private static function validarRolInventario(mixed $v): ?string
     {
         if ($v === null || $v === '') {
             return null;
         }
         if (!in_array($v, self::ROLES_INVENTARIO, true)) {
-            throw HttpError::validacion('Rol de Inventario inválido', 'rol_inventario');
-        }
-        if (!in_array('INVENTARIO', Plan::aplicativos($empresaId), true)) {
-            throw HttpError::validacion('Tu empresa no tiene habilitada la app de Inventario', 'rol_inventario');
+            throw HttpError::validacion('Rol de Ventario inválido', 'rol_inventario');
         }
         return $v;
+    }
+
+    /**
+     * Pareja coherente de roles (igual que normalizarRoles de Ventario):
+     * ADMIN y GERENTE son el mismo en las dos apps; AUXILIAR y VENDEDOR, solo
+     * Ventario; TALENTO_HUMANO y OPERARIO, solo Presente.
+     * @return array{0:?string, 1:?string}  [rol_inventario, rol_asistencia]
+     */
+    private static function normalizar(?string $rolInv, ?string $rolAsis): array
+    {
+        if (in_array($rolInv, ['ADMIN', 'GERENTE'], true)) {
+            if ($rolAsis !== null && $rolAsis !== $rolInv) {
+                throw HttpError::validacion('Administrador y gerente tienen el mismo rol en las dos apps', 'rol_asistencia');
+            }
+            return [$rolInv, $rolInv];
+        }
+        if ($rolInv !== null) {
+            if ($rolAsis !== null) {
+                throw HttpError::validacion('Auxiliar de inventario y vendedor son roles solo de Ventario', 'rol_asistencia');
+            }
+            return [$rolInv, null];
+        }
+        if (in_array($rolAsis, [Auth::ROL_ADMIN, Auth::ROL_GERENTE], true)) {
+            return [$rolAsis, $rolAsis];
+        }
+        return [null, $rolAsis];
     }
 
     /** @return array<int> sedes de la empresa (el gerente administra solo las suyas). */
@@ -263,7 +321,9 @@ final class UsuariosControlador
     {
         $error = match (true) {
             $rolInv === null && $rolAsis === null
-                => 'Dale acceso a al menos una app (Inventario o Control de Personal)',
+                => 'Elige un rol para la cuenta',
+            $rolInv === null && in_array($rolAsis, [Auth::ROL_TALENTO_HUMANO, Auth::ROL_OPERARIO], true) && $sedes !== []
+                => 'Talento humano y operario trabajan en todas las sedes: no se les asignan sedes',
             ($rolInv === 'ADMIN' || $rolAsis === 'ADMIN')
                 && (($rolInv !== null && $rolInv !== 'ADMIN') || ($rolAsis !== null && $rolAsis !== 'ADMIN'))
                 => 'El administrador de la empresa lo es en las dos apps',

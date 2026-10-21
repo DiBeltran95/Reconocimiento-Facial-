@@ -13,11 +13,12 @@ import 'controlador_kiosco.dart';
 
 /// Panel inferior del kiosco: cambia según la fase del reconocimiento.
 class PanelFase extends StatelessWidget {
-  const PanelFase({super.key, required this.k, required this.sync, required this.alAdministrar});
+  const PanelFase({super.key, required this.k, required this.sync, this.alAdministrar});
 
   final ControladorKiosco k;
   final Sincronizador sync;
-  final VoidCallback alAdministrar;
+  /// Null en la marcación pública: desde ahí no se entra al panel.
+  final VoidCallback? alAdministrar;
 
   @override
   Widget build(BuildContext context) {
@@ -58,9 +59,9 @@ class PanelFase extends StatelessWidget {
           titulo: p != null ? 'Preparando rostros ${p.hechos} de ${p.total}' : 'Aún no hay rostros registrados',
           detalle: p != null
               ? 'Descargando y procesando el personal de la sede'
-              : 'Un administrador debe registrar al personal de esta sede.',
+              : 'Talento humano o un administrador debe registrar al personal de esta sede.',
           cargando: p != null || sync.sincronizando,
-          accion: p == null ? ('Administrar', alAdministrar) : null,
+          accion: p == null && alAdministrar != null ? ('Administrar', alAdministrar!) : null,
         );
       case FaseKiosco.identificado:
         return TarjetaIdentificado(k: k);
@@ -91,7 +92,7 @@ class PanelFase extends StatelessWidget {
             color: Hud.peligro,
             titulo: 'Falta el modelo de reconocimiento',
             detalle: 'Agrega ${Constantes.rutaModelo} a la app (ver README).',
-            accion: ('Administrar', alAdministrar),
+            accion: alAdministrar == null ? null : ('Administrar', alAdministrar!),
           );
         }
         return _Instruccion(

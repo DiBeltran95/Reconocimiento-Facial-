@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/tema.dart';
+import '../../data/modelos.dart';
 import '../../servicios/estado_app.dart';
 import '../horarios/horarios_page.dart';
 import 'ajustes_page.dart';
@@ -9,9 +10,13 @@ import 'asistencia_page.dart';
 import 'contexto_admin.dart';
 import 'personal_page.dart';
 
-/// Panel administrativo: cuatro secciones en la barra inferior.
+/// Panel administrativo: cuatro secciones en la barra inferior. Lo usan el
+/// administrador, el gerente (sus sedes) y talento humano.
 class AdminShell extends StatefulWidget {
-  const AdminShell({super.key});
+  const AdminShell({super.key, required this.sedes});
+
+  /// Sedes de Presente visibles para la cuenta (al menos una).
+  final List<Sede> sedes;
 
   @override
   State<AdminShell> createState() => _AdminShellState();
@@ -19,7 +24,8 @@ class AdminShell extends StatefulWidget {
 
 class _AdminShellState extends State<AdminShell> {
   late final EstadoApp _estado = context.read<EstadoApp>();
-  late final ContextoAdmin _ctx = ContextoAdmin(api: _estado.api!, sedeDispositivo: _estado.config!.sede);
+  late final ContextoAdmin _ctx =
+      ContextoAdmin(api: _estado.api, sedes: widget.sedes, sedeDispositivo: _estado.config?.sede);
   int _indice = 0;
 
   static const _secciones = [
@@ -43,7 +49,7 @@ class _AdminShellState extends State<AdminShell> {
     super.dispose();
   }
 
-  /// Si la sesión expira por inactividad, se vuelve al kiosco.
+  /// Si la sesión expira por inactividad, se vuelve a la pantalla inicial.
   void _vigilarSesion() {
     if (!_estado.sesion.activa && mounted) Navigator.of(context).popUntil((r) => r.isFirst);
   }
@@ -62,7 +68,7 @@ class _AdminShellState extends State<AdminShell> {
         child: Scaffold(
           appBar: AppBar(
             leading: IconButton(
-              tooltip: 'Volver al kiosco',
+              tooltip: 'Volver al inicio',
               icon: const Icon(Icons.close_rounded),
               onPressed: () => Navigator.of(context).pop(),
             ),

@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/tema.dart';
+import '../../data/api.dart';
 import '../../servicios/ajustes.dart';
 import '../../servicios/estado_app.dart';
+import '../comun/vincular_telefono.dart';
 import '../comun/widgets.dart';
 import '../cuenta/mi_empresa_page.dart';
 import 'componentes_kiosco.dart';
@@ -23,8 +25,10 @@ class AjustesPage extends StatelessWidget {
           builder: (_) => ChangeNotifierProvider.value(value: context.read<ContextoAdmin>(), child: pagina),
         ));
     // Sedes y equipo los gestiona solo el administrador de la empresa; el
-    // gerente ve su empresa y los kioscos de sus sedes.
-    final esAdmin = context.read<EstadoApp>().sesion.sesion?.esAdminEmpresa ?? false;
+    // gerente y talento humano ven su empresa y los teléfonos de marcación.
+    final estado = context.read<EstadoApp>();
+    final esAdmin = estado.sesion.sesion?.esAdminEmpresa ?? false;
+    final vinculado = estado.configurado;
     return FondoTecnico(
       intensidad: 0.6,
       child: ListView(
@@ -36,7 +40,7 @@ class AjustesPage extends StatelessWidget {
               _Enlace(
                 icono: Icons.business_outlined,
                 titulo: 'Mi empresa',
-                detalle: 'Plan, uso, apps habilitadas y datos',
+                detalle: esAdmin ? 'Planes de Presente y Ventario, uso y datos' : 'Datos de la empresa y tu cuenta',
                 alTocar: () => abrir(const MiEmpresaPage()),
               ),
               if (esAdmin) ...[
@@ -44,7 +48,7 @@ class AjustesPage extends StatelessWidget {
                 _Enlace(
                   icono: Icons.place_outlined,
                   titulo: 'Sedes',
-                  detalle: 'Las mismas de Ventario',
+                  detalle: 'Compartidas con Ventario; elige cuáles usa Presente',
                   alTocar: () => abrir(const SedesPage()),
                 ),
                 const Divider(),
@@ -58,24 +62,77 @@ class AjustesPage extends StatelessWidget {
               const Divider(),
               _Enlace(
                 icono: Icons.devices_other_rounded,
-                titulo: 'Kioscos vinculados',
-                detalle: esAdmin ? 'Teléfonos y tablets de todas las sedes' : 'Teléfonos y tablets de tus sedes',
+                titulo: 'Teléfonos de marcación',
+                detalle: 'Por sede, con su código; renombrar o desvincular',
                 alTocar: () => abrir(const KioscosPage()),
               ),
             ],
           ),
           const SizedBox(height: Espacio.md),
-          const TarjetaEsteKiosco(),
-          const SizedBox(height: Espacio.md),
-          const TarjetaSincronizacion(permitirReprocesar: true),
-          const SizedBox(height: Espacio.md),
-          const _AjustesReconocimiento(),
+          if (vinculado) ...[
+            const TarjetaEsteKiosco(),
+            const SizedBox(height: Espacio.md),
+            const TarjetaSincronizacion(permitirReprocesar: true),
+            const SizedBox(height: Espacio.md),
+            const _AjustesReconocimiento(),
+          ] else
+            const _UsarEsteTelefono(),
           const SizedBox(height: Espacio.md),
           const _AjustesApariencia(),
-          const SizedBox(height: Espacio.md),
-          const TarjetaDesvincular(),
+          if (vinculado) ...[
+            const SizedBox(height: Espacio.md),
+            const TarjetaDesvincular(),
+          ],
         ],
       ),
+    );
+  }
+}
+
+/// En un teléfono sin vincular: dejarlo como punto de marcación de una sede.
+class _UsarEsteTelefono extends StatefulWidget {
+  const _UsarEsteTelefono();
+
+  @override
+  State<_UsarEsteTelefono> createState() => _UsarEsteTelefonoState();
+}
+
+class _UsarEsteTelefonoState extends State<_UsarEsteTelefono> {
+  bool _cargando = false;
+
+  Future<void> _vincular() async {
+    setState(() => _cargando = true);
+    try {
+      final registro = await vincularEsteTelefono(context, context.read<EstadoApp>());
+      if (registro == null || !mounted) return;
+      avisar(context, 'Listo: este teléfono marca asistencia en ${registro.sede.nombre}');
+      Navigator.of(context).popUntil((r) => r.isFirst);
+    } on ApiError catch (e) {
+      if (mounted) avisar(context, e.mensaje, error: true);
+    } finally {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Seccion(
+      titulo: 'Este teléfono',
+      hijos: [
+        Text(
+          'Úsalo como punto de marcación de una sede: el personal marcará aquí con su rostro. '
+          'Normalmente se hace con la cuenta Operario, pero también puedes hacerlo tú.',
+          style: context.textos.bodyMedium?.copyWith(color: context.sem.textoSuave),
+        ),
+        const SizedBox(height: Espacio.md),
+        FilledButton.tonalIcon(
+          onPressed: _cargando ? null : _vincular,
+          icon: _cargando
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.phonelink_ring_outlined),
+          label: const Text('Usar este teléfono para marcar asistencia'),
+        ),
+      ],
     );
   }
 }

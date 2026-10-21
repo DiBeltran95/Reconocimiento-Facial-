@@ -5,8 +5,7 @@ import 'package:provider/provider.dart';
 import 'core/tema.dart';
 import 'servicios/ajustes.dart';
 import 'servicios/estado_app.dart';
-import 'ui/configuracion/bienvenida_page.dart';
-import 'ui/kiosco/kiosco_page.dart';
+import 'ui/inicio/inicio_page.dart';
 
 class ControlPersonalApp extends StatelessWidget {
   const ControlPersonalApp({super.key, required this.estado});
@@ -34,26 +33,9 @@ class ControlPersonalApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          home: const _Inicio(),
+          home: const InicioPage(),
         ),
       ),
-    );
-  }
-}
-
-/// Sin vínculo → asistente de configuración. Con vínculo → kiosco.
-class _Inicio extends StatelessWidget {
-  const _Inicio();
-
-  @override
-  Widget build(BuildContext context) {
-    final estado = context.watch<EstadoApp>();
-    if (!estado.configurado) return const BienvenidaPage();
-    return ChangeNotifierProvider.value(
-      // La clave fuerza un kiosco nuevo si se vuelve a vincular.
-      key: ObjectKey(estado.sincronizador),
-      value: estado.sincronizador!,
-      child: const KioscoPage(),
     );
   }
 }

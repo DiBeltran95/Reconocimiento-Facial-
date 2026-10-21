@@ -25,7 +25,7 @@ final class EmpleadosControlador
 {
     /** Un empleado ligado solo está activo si su cuenta también lo está. */
     private const SELECT = "SELECT e.id, e.empresa_id, e.sede_id, e.usuario_id, e.documento, e.nombre, e.cargo,
-                                   e.activo, e.consentimiento_en, u.email AS cuenta_email,
+                                   e.activo, e.en_pausa, e.consentimiento_en, u.email AS cuenta_email,
                                    (e.usuario_id IS NOT NULL AND (u.activo <> 1 OR u.deleted_at IS NOT NULL)) AS cuenta_inactiva
                               FROM asis_empleados e
                               LEFT JOIN usuarios u ON u.id = e.usuario_id";
@@ -146,6 +146,21 @@ final class EmpleadosControlador
         Response::json(['empleado' => self::aJson(self::buscar((int) $actual['id'], $admin['empresa_id']))]);
     }
 
+    /**
+     * Pausa o reactiva a una persona en Presente cuando el plan no alcanza
+     * para todos: en pausa no ocupa cupo ni marca, pero conserva sus fotos e
+     * historial. Reactivar exige cupo (LIMITE_PLAN → 409).
+     */
+    public static function pausar(Request $req): never
+    {
+        $admin = Auth::admin($req);
+        $empleado = self::buscar($req->param('id'), $admin['empresa_id']);
+        Auth::exigirSede($admin, (int) $empleado['sede_id']);
+        $pausada = (bool) ($req->json()['pausada'] ?? true);
+        Db::query('UPDATE asis_empleados SET en_pausa = ? WHERE id = ?', [$pausada ? 1 : 0, $empleado['id']]);
+        Response::json(['empleado' => self::aJson(self::buscar((int) $empleado['id'], $admin['empresa_id']))]);
+    }
+
     /** Baja lógica: conserva el historial pero borra sus datos biométricos. */
     public static function desactivar(Request $req): never
     {
@@ -237,6 +252,8 @@ final class EmpleadosControlador
             'nombre'            => $e['nombre'],
             'cargo'             => $e['cargo'],
             'activo'            => (int) $e['activo'] === 1,
+            // En pausa por el plan: no ocupa cupo ni puede marcar hasta reactivarla.
+            'en_pausa'          => (int) ($e['en_pausa'] ?? 0) === 1,
             // Ligado a una cuenta: entra también a las apps con ese correo.
             'cuenta'            => isset($e['usuario_id']) && $e['usuario_id'] !== null
                 ? ['email' => $e['cuenta_email'], 'activa' => !(bool) $e['cuenta_inactiva']]

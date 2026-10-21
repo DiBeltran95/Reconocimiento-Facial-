@@ -200,7 +200,7 @@ class _EnrolarPageState extends State<EnrolarPage> {
       _progreso = 'Subiendo fotos al servidor…';
     });
     try {
-      final refs = await _estado.api!.subirFotos(widget.empleado.id, _fotos);
+      final refs = await _estado.api.subirFotos(widget.empleado.id, _fotos);
       if (widget.empleado.sedeId == _estado.config?.sede.id) {
         setState(() => _progreso = 'Calculando huella facial en este equipo…');
         await _estado.sincronizador?.incorporarEnrolamiento(widget.empleado, refs, _fotos);

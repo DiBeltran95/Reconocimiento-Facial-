@@ -9,9 +9,10 @@ import '../cuenta/plan_ui.dart';
 import 'acceso_admin.dart' show MensajeError;
 import 'contexto_admin.dart';
 
-/// Sedes de la empresa (solo el administrador). Son las mismas de Inventario:
-/// crear una aquí la crea allá. El cupo del plan se revisa antes de abrir el
-/// formulario y lo exige el servidor.
+/// Sedes de la empresa (solo el administrador). Son las mismas de Ventario:
+/// crear una aquí la crea allá. Cada app trabaja solo en las sedes que se
+/// eligen para ella, hasta el límite de SU plan, y la elección no se puede
+/// deshacer. Crear una sede aquí la elige para Presente.
 class SedesPage extends StatefulWidget {
   const SedesPage({super.key});
 
@@ -23,6 +24,7 @@ class _SedesPageState extends State<SedesPage> {
   late final ContextoAdmin _ctx = context.read<ContextoAdmin>();
   Api get _api => _ctx.api;
   List<Sede>? _sedes;
+  PlanEmpresa? _plan;
   String? _error;
 
   @override
@@ -34,9 +36,16 @@ class _SedesPageState extends State<SedesPage> {
   Future<void> _cargar() async {
     try {
       final s = await _api.sedes(todas: true);
+      PlanEmpresa? plan;
+      try {
+        plan = await _api.plan();
+      } on ApiError {
+        plan = null;
+      }
       if (mounted) {
         setState(() {
           _sedes = s;
+          _plan = plan;
           _error = null;
         });
       }
@@ -57,6 +66,14 @@ class _SedesPageState extends State<SedesPage> {
     );
     if (guardada == null || !mounted) return;
     avisar(context, sede == null ? 'Sede ${guardada.nombre} creada' : 'Cambios guardados');
+    await _cargar();
+    await _ctx.cargarSedes();
+  }
+
+  Future<void> _elegir(Sede sede) async {
+    final elegida = await confirmarSedeParaPresente(context, _api, sede, plan: _plan);
+    if (elegida == null || !mounted) return;
+    avisar(context, '${sede.nombre} ya está en Presente');
     await _cargar();
     await _ctx.cargarSedes();
   }
@@ -87,9 +104,19 @@ class _SedesPageState extends State<SedesPage> {
                     if (i == 0) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: Espacio.xs),
-                        child: Text(
-                          'Las sedes se comparten con Ventario: lo que cambies aquí se ve en las dos apps.',
-                          style: context.textos.bodyMedium?.copyWith(color: context.sem.textoSuave),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              'Las sedes se comparten con Ventario, pero cada app usa solo las que eliges para ella, '
+                              'hasta el límite de su plan.',
+                              style: context.textos.bodyMedium?.copyWith(color: context.sem.textoSuave),
+                            ),
+                            if (_plan != null) ...[
+                              const SizedBox(height: Espacio.md),
+                              MedidorUso(recurso: RecursoLimitado.sedes, uso: _plan!.sedes),
+                            ],
+                          ],
                         ),
                       );
                     }
@@ -107,14 +134,24 @@ class _SedesPageState extends State<SedesPage> {
                           ),
                         ),
                         title: Text(s.nombre),
-                        subtitle: Text(s.direccion ?? 'Sin dirección'),
-                        trailing: Wrap(
-                          spacing: Espacio.xs,
-                          children: [
-                            if (s.esPrincipal) Pildora(texto: 'Principal', color: context.colores.primary),
-                            if (!s.activo) Pildora(texto: 'Inactiva', color: context.sem.textoSuave),
-                          ],
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: Espacio.xxs),
+                          child: Wrap(
+                            spacing: Espacio.xs,
+                            runSpacing: Espacio.xxs,
+                            children: [
+                              if (s.esPrincipal) Pildora(texto: 'Principal', color: context.colores.primary),
+                              if (!s.activo) Pildora(texto: 'Inactiva', color: context.sem.textoSuave),
+                              if (s.elegida)
+                                Pildora(texto: 'En Presente', color: context.sem.entrada, icono: Icons.face_unlock_outlined),
+                              if (s.elegidaVentario ?? false)
+                                Pildora(texto: 'En Ventario', color: context.sem.salida, icono: Icons.point_of_sale_outlined),
+                            ],
+                          ),
                         ),
+                        trailing: !s.elegida && s.activo
+                            ? TextButton(onPressed: () => _elegir(s), child: const Text('Usar en Presente'))
+                            : null,
                         onTap: () => _abrir(s),
                       ),
                     );
@@ -252,4 +289,74 @@ class _FormSedeState extends State<_FormSede> {
       ),
     );
   }
+}
+
+/// Confirma (es irrevocable) y elige [sede] para Presente. Devuelve la sede
+/// elegida o null si se canceló o el plan no alcanza.
+Future<Sede?> confirmarSedeParaPresente(BuildContext context, Api api, Sede sede, {PlanEmpresa? plan}) async {
+  final sedes = plan?.sedes;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      icon: Icon(Icons.place_outlined, color: c.colores.primary),
+      title: Text('¿Usar ${sede.nombre} en Presente?'),
+      content: Text(
+        [
+          'Presente empezará a trabajar en esta sede: personal, teléfonos de marcación y reportes.',
+          'Esta elección no se puede deshacer.',
+          if (sedes != null && sedes.maximo != null)
+            'Tu plan de Presente permite ${sedes.maximo} sede${sedes.maximo == 1 ? '' : 's'} y ya usas ${sedes.usados}.',
+        ].join('\n\n'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sí, usarla')),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return null;
+  try {
+    return await api.elegirSede(sede.id);
+  } on ApiError catch (e) {
+    if (!context.mounted) return null;
+    if (!await manejarLimite(context, api, e) && context.mounted) avisar(context, e.mensaje, error: true);
+    return null;
+  }
+}
+
+/// Sin ninguna sede para Presente: el administrador elige la primera.
+Future<Sede?> pedirPrimeraSede(BuildContext context, Api api) async {
+  final activas = (await api.sedes(todas: true)).where((s) => s.activo).toList();
+  if (activas.isEmpty || !context.mounted) return null;
+  final sede = await showModalBottomSheet<Sede>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (c) => ListView(
+      shrinkWrap: true,
+      padding: const EdgeInsets.fromLTRB(Espacio.lg, 0, Espacio.lg, Espacio.lg),
+      children: [
+        Text('¿En qué sede usarás Presente?', style: c.textos.headlineSmall),
+        const SizedBox(height: Espacio.xxs),
+        Text(
+          'Tu empresa aún no tiene sedes en Presente. Elige una para empezar.',
+          style: c.textos.bodyMedium?.copyWith(color: c.sem.textoSuave),
+        ),
+        const SizedBox(height: Espacio.md),
+        for (final s in activas)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.place_outlined),
+              title: Text(s.nombre),
+              subtitle: s.direccion == null ? null : Text(s.direccion!),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.pop(c, s),
+            ),
+          ),
+      ],
+    ),
+  );
+  if (sede == null || !context.mounted) return null;
+  return confirmarSedeParaPresente(context, api, sede);
 }

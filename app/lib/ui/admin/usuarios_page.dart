@@ -11,8 +11,9 @@ import 'acceso_admin.dart';
 import 'contexto_admin.dart';
 
 /// Equipo: las cuentas de la empresa. Una cuenta es UNA persona para las dos
-/// apps de la plataforma, con un rol en cada una (o sin acceso a alguna). Las
-/// sedes son las mismas en las dos. Solo el administrador la gestiona.
+/// apps de la plataforma, con UN rol que decide a cuál entra: administrador y
+/// gerente en las dos; vendedor y auxiliar solo en Ventario; talento humano y
+/// operario solo en Presente. Solo el administrador la gestiona.
 class UsuariosPage extends StatefulWidget {
   const UsuariosPage({super.key});
 
@@ -36,6 +37,8 @@ class _UsuariosPageState extends State<UsuariosPage> {
   Future<void> _cargar() async {
     try {
       final equipo = await _api.usuarios();
+      // Las sedes de Presente (el servidor valida contra ellas). Las que solo
+      // usa Ventario se asignan desde Ventario.
       final sedes = await _api.sedes();
       if (mounted) {
         setState(() {
@@ -71,8 +74,10 @@ class _UsuariosPageState extends State<UsuariosPage> {
   }
 
   String _sedesDe(Usuario u) {
-    if (u.rolAsistencia == RolAsistencia.admin || u.rolInventario == RolInventario.admin) return 'Todas las sedes';
-    if (u.sedes.isEmpty) return 'Cualquier sede (kioscos)';
+    final rol = u.rolCuenta;
+    if (rol == RolCuenta.admin) return 'Todas las sedes';
+    if (rol == RolCuenta.talentoHumano || rol == RolCuenta.operario) return 'Todas las sedes de Presente';
+    if (u.sedes.isEmpty) return 'Sin sedes asignadas';
     return u.sedes.map((id) => _sedes.where((s) => s.id == id).firstOrNull?.nombre ?? 'Sede $id').join(', ');
   }
 
@@ -103,12 +108,18 @@ class _UsuariosPageState extends State<UsuariosPage> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            'Cada cuenta entra con su correo a las apps de la empresa, con el rol que le des en cada una.',
+                            'Cada cuenta entra con su correo a las apps que le da su rol.',
                             style: context.textos.bodyMedium,
                           ),
                           if (equipo.plan != null) ...[
                             const SizedBox(height: Espacio.md),
                             MedidorUso(recurso: RecursoLimitado.personas, uso: equipo.plan!.personas),
+                            const SizedBox(height: Espacio.xxs),
+                            Text(
+                              'Personas en el plan de Presente. Si no alcanza, pausa a quien no la use: '
+                              'su cuenta sigue en Ventario.',
+                              style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
+                            ),
                           ],
                         ],
                       ),
@@ -142,16 +153,17 @@ class _UsuariosPageState extends State<UsuariosPage> {
                                         children: [
                                           if (!u.activo) Pildora(texto: 'Inactiva', color: sem.peligro),
                                           Pildora(
-                                            texto: 'Personal · ${u.rolAsistencia?.etiqueta ?? 'Sin acceso'}',
-                                            color: u.rolAsistencia == null ? sem.textoSuave : context.colores.primary,
-                                            icono: Icons.face_unlock_outlined,
+                                            texto: u.rolCuenta?.etiqueta ?? 'Sin rol',
+                                            color: context.colores.primary,
                                           ),
-                                          if (equipo.aplicativos.contains('INVENTARIO'))
+                                          if (u.rolAsistencia != null)
                                             Pildora(
-                                              texto: 'Ventario · ${u.rolInventario?.etiqueta ?? 'Sin acceso'}',
-                                              color: u.rolInventario == null ? sem.textoSuave : sem.salida,
-                                              icono: Icons.point_of_sale_outlined,
+                                              texto: u.pausaAsistencia ? 'Presente · en pausa' : 'Presente',
+                                              color: u.pausaAsistencia ? sem.alerta : sem.entrada,
+                                              icono: Icons.face_unlock_outlined,
                                             ),
+                                          if (u.rolInventario != null)
+                                            Pildora(texto: 'Ventario', color: sem.salida, icono: Icons.point_of_sale_outlined),
                                         ],
                                       ),
                                       const SizedBox(height: Espacio.xxs),
@@ -190,17 +202,16 @@ class _FormUsuarioState extends State<_FormUsuario> {
   late final _email = TextEditingController(text: widget.usuario?.email);
   late final _documento = TextEditingController(text: widget.usuario?.documento);
   final _clave = TextEditingController();
-  late RolAsistencia? _rolAsis = widget.usuario == null ? RolAsistencia.operador : widget.usuario!.rolAsistencia;
-  late RolInventario? _rolInv = widget.usuario?.rolInventario;
+  late RolCuenta? _rol = widget.usuario?.rolCuenta;
   late final Set<int> _sedes = {...?widget.usuario?.sedes};
   late bool _activo = widget.usuario?.activo ?? true;
+  late bool _pausa = widget.usuario?.pausaAsistencia ?? false;
   bool _guardando = false;
   bool _ocultar = true;
   String? _error;
-  String? _errorSedes;
+  String? _errorRol;
 
   bool get _nuevo => widget.usuario == null;
-  bool get _esAdmin => _rolAsis == RolAsistencia.admin || _rolInv == RolInventario.admin;
 
   @override
   void dispose() {
@@ -211,83 +222,59 @@ class _FormUsuarioState extends State<_FormUsuario> {
     super.dispose();
   }
 
-  /// El administrador lo es en las dos apps y ve todas las sedes: elegirlo en
-  /// una lo ajusta en la otra (las mismas reglas que exige el servidor).
-  void _elegirAsistencia(RolAsistencia? r) => setState(() {
-        _rolAsis = r;
-        if (r == RolAsistencia.admin) {
-          if (widget.conInventario) _rolInv = RolInventario.admin;
-          _sedes.clear();
-        } else if (_rolInv == RolInventario.admin) {
-          _rolInv = null;
-        }
-        _errorSedes = null;
-      });
-
-  void _elegirInventario(RolInventario? r) => setState(() {
-        _rolInv = r;
-        if (r == RolInventario.admin) {
-          _rolAsis = RolAsistencia.admin;
-          _sedes.clear();
-        } else if (_rolAsis == RolAsistencia.admin) {
-          _rolAsis = null;
-        }
-        if (r?.unaSede ?? false) {
-          if (_sedes.length > 1) _sedes.removeAll(_sedes.skip(1).toList());
-        }
-        _errorSedes = null;
+  void _elegirRol(RolCuenta r) => setState(() {
+        _rol = r;
+        if (!r.conSedes) _sedes.clear();
+        if (r.unaSede && _sedes.length > 1) _sedes.removeAll(_sedes.skip(1).toList());
+        if (r.asistencia == null || r == RolCuenta.admin) _pausa = false;
+        _errorRol = null;
       });
 
   void _alternarSede(int id) => setState(() {
-        if (_rolInv?.unaSede ?? false) {
+        if (_rol?.unaSede ?? false) {
           _sedes
             ..clear()
             ..add(id);
         } else if (!_sedes.remove(id)) {
           _sedes.add(id);
         }
-        _errorSedes = null;
+        _errorRol = null;
       });
 
-  /// Reglas de domain/alcance.js · validarSedesDeRol, para avisar junto al campo.
-  String? _validarCombinacion() {
-    if (_rolAsis == null && _rolInv == null) return 'Dale acceso a al menos una app';
-    if (_esAdmin) return null;
-    if ((_rolInv?.unaSede ?? false) && _sedes.length != 1) return 'Vendedores y auxiliares pertenecen a exactamente una sede';
-    if ((_rolAsis == RolAsistencia.gerente || _rolInv == RolInventario.gerente) && _sedes.isEmpty) {
-      return 'Un gerente necesita al menos una sede';
-    }
+  /// Las mismas reglas que exigen los dos servidores.
+  String? _validarRol() {
+    final r = _rol;
+    if (r == null) return 'Elige un rol para la cuenta';
+    if (r.unaSede && _sedes.length != 1) return 'Vendedores y auxiliares pertenecen a exactamente una sede';
+    if (r == RolCuenta.gerente && _sedes.isEmpty) return 'Un gerente necesita al menos una sede';
     return null;
   }
 
-  String get _ayudaSedes {
-    if (_esAdmin) return 'El administrador ve todas las sedes.';
-    if (_rolInv?.unaSede ?? false) return 'Elige la sede donde trabaja.';
-    if (_rolAsis == RolAsistencia.gerente || _rolInv == RolInventario.gerente) return 'Elige una o varias sedes a su cargo.';
-    return 'Opcional: el operador atiende los kioscos de cualquier sede.';
-  }
-
   Future<void> _guardar() async {
-    final errorSedes = _validarCombinacion();
+    final errorRol = _validarRol();
     final valido = _form.currentState!.validate();
-    setState(() => _errorSedes = errorSedes);
-    if (!valido || errorSedes != null) return;
+    setState(() => _errorRol = errorRol);
+    if (!valido || errorRol != null) return;
+    final rol = _rol!;
     setState(() {
       _guardando = true;
       _error = null;
     });
     try {
-      await widget.api.guardarUsuario(
+      final guardado = await widget.api.guardarUsuario(
         id: widget.usuario?.id,
         nombre: _nombre.text.trim(),
         email: _nuevo ? _email.text.trim().toLowerCase() : null,
         password: _clave.text,
-        rolAsistencia: _rolAsis,
-        rolInventario: widget.conInventario ? _rolInv : null,
-        sedes: _esAdmin ? const [] : _sedes.toList(),
+        rolAsistencia: rol.asistencia,
+        rolInventario: rol.inventario,
+        sedes: rol.conSedes ? _sedes.toList() : const [],
         documento: _documento.text.trim().isEmpty ? null : _documento.text.trim(),
         activo: _nuevo ? null : _activo,
       );
+      if (!_nuevo && rol.asistencia != null && _pausa != guardado.pausaAsistencia) {
+        await widget.api.pausarUsuario(guardado.id, pausada: _pausa);
+      }
       if (mounted) {
         avisar(context, _nuevo ? 'Cuenta creada: ya puede entrar con su correo' : 'Cambios guardados');
         Navigator.pop(context, true);
@@ -312,9 +299,18 @@ class _FormUsuarioState extends State<_FormUsuario> {
         ),
       );
 
+  String get _ayudaSedes => (_rol?.unaSede ?? false) ? 'Elige la sede donde trabaja.' : 'Elige una o varias sedes a su cargo.';
+
   @override
   Widget build(BuildContext context) {
     final sem = context.sem;
+    final rol = _rol;
+    final grupos = <(String, IconData, List<RolCuenta>)>[
+      ('En las dos apps', Icons.apps_rounded, const [RolCuenta.admin, RolCuenta.gerente]),
+      if (widget.conInventario)
+        ('Solo Ventario', Icons.point_of_sale_outlined, const [RolCuenta.vendedor, RolCuenta.auxiliar]),
+      ('Solo Presente', Icons.face_unlock_outlined, const [RolCuenta.talentoHumano, RolCuenta.operario]),
+    ];
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SingleChildScrollView(
@@ -385,49 +381,43 @@ class _FormUsuarioState extends State<_FormUsuario> {
               const SizedBox(height: Espacio.xs),
               FortalezaClave(clave: _clave.text),
 
-              _titulo('Acceso a Presente', Icons.face_unlock_outlined),
-              _Opciones<RolAsistencia?>(
-                valor: _rolAsis,
-                opciones: [
-                  (null, 'Sin acceso', 'No entra a esta app'),
-                  for (final r in RolAsistencia.values) (r, r.etiqueta, r.descripcion),
-                ],
-                alElegir: _elegirAsistencia,
-              ),
-
-              if (widget.conInventario) ...[
-                _titulo('Acceso a Ventario', Icons.point_of_sale_outlined),
-                _Opciones<RolInventario?>(
-                  valor: _rolInv,
-                  opciones: const [
-                    (null, 'Sin acceso', 'No entra a Ventario'),
-                    (RolInventario.vendedor, 'Vendedor', 'Vende en su sede'),
-                    (RolInventario.auxiliar, 'Auxiliar de inventario', 'Registra entradas en su sede'),
-                    (RolInventario.gerente, 'Gerente', 'Catálogo, stock y personal de sus sedes'),
-                    (RolInventario.admin, 'Director', 'Todo en la empresa'),
-                  ],
-                  alElegir: _elegirInventario,
+              for (final (titulo, icono, roles) in grupos) ...[
+                _titulo(titulo, icono),
+                _Opciones<RolCuenta>(
+                  valor: rol,
+                  opciones: [for (final r in roles) (r, r.etiqueta, r.descripcion)],
+                  alElegir: _elegirRol,
                 ),
               ],
 
-              _titulo('Sedes', Icons.place_outlined),
-              Text(_ayudaSedes, style: context.textos.bodySmall?.copyWith(color: sem.textoSuave)),
-              const SizedBox(height: Espacio.xs),
-              Wrap(
-                spacing: Espacio.xs,
-                runSpacing: Espacio.xs,
-                children: [
-                  for (final s in widget.sedes)
-                    FilterChip(
-                      label: Text(s.nombre),
-                      selected: !_esAdmin && _sedes.contains(s.id),
-                      onSelected: _esAdmin ? null : (_) => _alternarSede(s.id),
-                    ),
-                ],
-              ),
-              if (_errorSedes != null) ...[
+              if (rol != null && rol.conSedes) ...[
+                _titulo('Sedes', Icons.place_outlined),
+                Text(_ayudaSedes, style: context.textos.bodySmall?.copyWith(color: sem.textoSuave)),
                 const SizedBox(height: Espacio.xs),
-                Text(_errorSedes!, style: context.textos.bodySmall?.copyWith(color: sem.peligro)),
+                Wrap(
+                  spacing: Espacio.xs,
+                  runSpacing: Espacio.xs,
+                  children: [
+                    for (final s in widget.sedes)
+                      FilterChip(
+                        label: Text(s.nombre),
+                        selected: _sedes.contains(s.id),
+                        onSelected: (_) => _alternarSede(s.id),
+                      ),
+                  ],
+                ),
+              ] else if (rol != null) ...[
+                const SizedBox(height: Espacio.sm),
+                Text(
+                  rol == RolCuenta.admin
+                      ? 'El administrador ve todas las sedes.'
+                      : 'Trabaja en todas las sedes de Presente: no se le asignan sedes.',
+                  style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
+                ),
+              ],
+              if (_errorRol != null) ...[
+                const SizedBox(height: Espacio.xs),
+                Text(_errorRol!, style: context.textos.bodySmall?.copyWith(color: sem.peligro)),
               ],
 
               if (!_nuevo) ...[
@@ -439,6 +429,14 @@ class _FormUsuarioState extends State<_FormUsuario> {
                   title: const Text('Cuenta activa'),
                   subtitle: const Text('Inactiva: no entra a ninguna app y libera su cupo del plan.'),
                 ),
+                if (rol?.asistencia != null && rol != RolCuenta.admin)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _pausa,
+                    onChanged: (v) => setState(() => _pausa = v),
+                    title: const Text('En pausa en Presente'),
+                    subtitle: const Text('No entra a Presente ni ocupa su cupo; en Ventario sigue igual.'),
+                  ),
               ],
               if (_error != null) ...[
                 const SizedBox(height: Espacio.md),
@@ -463,7 +461,7 @@ class _FormUsuarioState extends State<_FormUsuario> {
 /// decidir qué puede hacer alguien).
 class _Opciones<T> extends StatelessWidget {
   const _Opciones({required this.valor, required this.opciones, required this.alElegir});
-  final T valor;
+  final T? valor;
   final List<(T, String, String)> opciones;
   final ValueChanged<T> alElegir;
 

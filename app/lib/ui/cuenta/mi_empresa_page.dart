@@ -24,11 +24,14 @@ class MiEmpresaPage extends StatefulWidget {
 
 class _MiEmpresaPageState extends State<MiEmpresaPage> {
   late final EstadoApp _estado = context.read<EstadoApp>();
-  Api get _api => _estado.api!;
+  Api get _api => _estado.api;
   EmpresaInfo? _empresa;
   String? _error;
 
   bool get _esAdmin => _estado.sesion.sesion?.esAdminEmpresa ?? false;
+
+  /// Talento humano no ve los planes (no los gestiona).
+  bool get _vePlanes => !(_estado.sesion.sesion?.esTalentoHumano ?? false);
 
   @override
   void initState() {
@@ -74,7 +77,7 @@ class _MiEmpresaPageState extends State<MiEmpresaPage> {
       builder: (_) => _FormEliminar(api: _api, empresa: _empresa!, esAdmin: _esAdmin),
     );
     if (eliminada == true && mounted) {
-      // La cuenta ya no existe: se cierra la sesión y se vuelve al kiosco.
+      // La cuenta ya no existe: se cierra la sesión y se vuelve al inicio.
       _estado.sesion.cerrar();
       Navigator.of(context).popUntil((r) => r.isFirst);
     }
@@ -120,8 +123,14 @@ class _MiEmpresaPageState extends State<MiEmpresaPage> {
                       ],
                     ),
                     const SizedBox(height: Espacio.md),
-                    if (e.plan != null) TarjetaPlan(plan: e.plan!),
-                    const SizedBox(height: Espacio.md),
+                    if (_vePlanes && e.plan != null) ...[
+                      TarjetaPlan(plan: e.plan!),
+                      const SizedBox(height: Espacio.md),
+                    ],
+                    if (_vePlanes && e.planVentario != null) ...[
+                      TarjetaPlan(plan: e.planVentario!),
+                      const SizedBox(height: Espacio.md),
+                    ],
                     Seccion(
                       titulo: 'Apps de la plataforma',
                       hijos: [

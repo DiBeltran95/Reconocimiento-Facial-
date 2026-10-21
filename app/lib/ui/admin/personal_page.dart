@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/tema.dart';
 import '../../data/api.dart';
 import '../../data/modelos.dart';
+import '../../servicios/estado_app.dart';
 import '../comun/widgets.dart';
 import '../cuenta/plan_ui.dart';
 import '../horarios/widgets_horario.dart';
@@ -70,6 +71,38 @@ class _PersonalPageState extends State<PersonalPage> {
     if (cambio == true) _cargar();
   }
 
+  /// Pausar libera su cupo del plan; reactivar lo vuelve a ocupar.
+  Future<void> _pausar(Empleado e) async {
+    final pausar = !e.enPausa;
+    if (pausar) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('¿Pausar a ${e.nombre}?'),
+          content: const Text(
+            'No podrá marcar asistencia y deja libre su cupo del plan. Conserva sus datos y su rostro: '
+            'puedes reactivarla cuando haya cupo.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Pausar')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    final sync = context.read<EstadoApp>().sincronizador;
+    try {
+      await _ctx.api.pausarEmpleado(e.id, pausada: pausar);
+      if (mounted) avisar(context, pausar ? '${e.nombre} quedó en pausa' : '${e.nombre} ya puede marcar');
+      sync?.sincronizar();
+      _cargar();
+    } on ApiError catch (err) {
+      if (!mounted) return;
+      if (!await manejarLimite(context, _ctx.api, err) && mounted) avisar(context, err.mensaje, error: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final lista = (_empleados ?? const <Empleado>[])
@@ -81,6 +114,7 @@ class _PersonalPageState extends State<PersonalPage> {
             (e.cargo ?? '').toLowerCase().contains(_busqueda))
         .toList();
     final sinRostro = (_empleados ?? const <Empleado>[]).where((e) => !e.tieneRostro).length;
+    final enPausa = (_empleados ?? const <Empleado>[]).where((e) => e.enPausa).length;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -120,6 +154,13 @@ class _PersonalPageState extends State<PersonalPage> {
                             style: context.textos.labelLarge?.copyWith(color: context.sem.textoSuave),
                           ),
                           const Spacer(),
+                          if (enPausa > 0) ...[
+                            Tooltip(
+                              message: 'No marcan ni ocupan cupo del plan de Presente',
+                              child: Pildora(texto: 'En pausa: $enPausa', color: context.sem.alerta),
+                            ),
+                            const SizedBox(width: Espacio.xs),
+                          ],
                           if (sinRostro > 0)
                             FilterChip(
                               avatar: Icon(Icons.face_retouching_off_rounded, size: 18, color: context.sem.alerta),
@@ -159,7 +200,12 @@ class _PersonalPageState extends State<PersonalPage> {
                   sliver: SliverList.separated(
                     itemCount: lista.length,
                     separatorBuilder: (_, _) => const SizedBox(height: Espacio.xs),
-                    itemBuilder: (_, i) => _TarjetaEmpleado(empleado: lista[i], api: _ctx.api, alTocar: () => _abrir(lista[i])),
+                    itemBuilder: (_, i) => _TarjetaEmpleado(
+                      empleado: lista[i],
+                      api: _ctx.api,
+                      alTocar: () => _abrir(lista[i]),
+                      alPausar: () => _pausar(lista[i]),
+                    ),
                   ),
                 ),
             ],
@@ -171,16 +217,19 @@ class _PersonalPageState extends State<PersonalPage> {
 }
 
 class _TarjetaEmpleado extends StatelessWidget {
-  const _TarjetaEmpleado({required this.empleado, required this.api, required this.alTocar});
+  const _TarjetaEmpleado({required this.empleado, required this.api, required this.alTocar, required this.alPausar});
   final Empleado empleado;
   final Api api;
   final VoidCallback alTocar;
+  final VoidCallback alPausar;
 
   @override
   Widget build(BuildContext context) {
     final sem = context.sem;
     final foto = empleado.fotos.isEmpty ? null : api.foto(empleado.id, empleado.fotos.first.n, empleado.fotos.first.v);
-    return Card(
+    return Opacity(
+      opacity: empleado.enPausa ? 0.7 : 1,
+      child: Card(
       child: InkWell(
         onTap: alTocar,
         borderRadius: BorderRadius.circular(Redondeo.lg),
@@ -215,14 +264,30 @@ class _TarjetaEmpleado extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: Espacio.xs),
-              empleado.tieneRostro
-                  ? Pildora(texto: 'Rostro', color: sem.entrada, fondo: sem.entradaFondo, icono: Icons.verified_rounded)
-                  : Pildora(texto: 'Sin rostro', color: sem.alerta, fondo: sem.alertaFondo, icono: Icons.face_retouching_off_rounded),
-              const SizedBox(width: Espacio.xxs),
-              Icon(Icons.chevron_right_rounded, color: sem.textoSuave),
+              if (empleado.enPausa)
+                Pildora(texto: 'En pausa', color: sem.alerta, fondo: sem.alertaFondo, icono: Icons.pause_circle_outline_rounded)
+              else if (empleado.tieneRostro)
+                Pildora(texto: 'Rostro', color: sem.entrada, fondo: sem.entradaFondo, icono: Icons.verified_rounded)
+              else
+                Pildora(texto: 'Sin rostro', color: sem.alerta, fondo: sem.alertaFondo, icono: Icons.face_retouching_off_rounded),
+              PopupMenuButton<String>(
+                tooltip: 'Opciones de ${empleado.nombre}',
+                onSelected: (v) => v == 'pausa' ? alPausar() : alTocar(),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'editar', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Editar'))),
+                  PopupMenuItem(
+                    value: 'pausa',
+                    child: ListTile(
+                      leading: Icon(empleado.enPausa ? Icons.play_circle_outline_rounded : Icons.pause_circle_outline_rounded),
+                      title: Text(empleado.enPausa ? 'Reactivar' : 'Pausar por el plan'),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
+      ),
       ),
     );
   }

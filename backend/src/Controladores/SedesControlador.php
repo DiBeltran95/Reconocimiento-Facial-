@@ -24,11 +24,48 @@ final class SedesControlador
         $admin = Auth::adminEmpresa($req);
         $d = self::validar($req->json(), true);
         $uuid = Ids::uuid();
-        Db::query(
-            'INSERT INTO sedes (uuid, empresa_id, nombre, codigo, direccion, telefono) VALUES (?, ?, ?, ?, ?, ?)',
-            [$uuid, $admin['empresa_id'], $d['nombre'], $d['codigo'], $d['direccion'], $d['telefono']],
-        );
-        Response::json(['sede' => self::aJson(self::buscar((int) Db::pdo()->lastInsertId(), $admin))], 201);
+        // Creada desde Presente, se usa en Presente. Si su plan no admite otra
+        // sede (aunque el de Ventario sí), la base lo rechaza: LIMITE_PLAN → 409.
+        $pdo = Db::pdo();
+        $pdo->beginTransaction();
+        try {
+            Db::query(
+                'INSERT INTO sedes (uuid, empresa_id, nombre, codigo, direccion, telefono) VALUES (?, ?, ?, ?, ?, ?)',
+                [$uuid, $admin['empresa_id'], $d['nombre'], $d['codigo'], $d['direccion'], $d['telefono']],
+            );
+            $id = (int) $pdo->lastInsertId();
+            Db::query(
+                "INSERT INTO sede_aplicativos (sede_id, aplicativo, elegida_por) VALUES (?, 'ASISTENCIA', ?)",
+                [$id, $admin['id']],
+            );
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+        Response::json(['sede' => self::aJson(self::buscar($id, $admin) + ['elegida' => 1])], 201);
+    }
+
+    /**
+     * Usar una sede de la empresa en Presente. IRREVOCABLE: no hay ruta para
+     * dejar de usarla (solo la plataforma la quita si el plan baja). Sin cupo
+     * en el plan de Presente → LIMITE_PLAN 409.
+     */
+    public static function elegir(Request $req): never
+    {
+        $admin = Auth::adminEmpresa($req);
+        $sede = self::buscar($req->param('id'), $admin);
+        if ((int) $sede['activo'] !== 1) {
+            throw HttpError::validacion('Activa la sede antes de usarla en Presente', 'activo');
+        }
+        if (!Auth::sedeElegida((int) $sede['id'])) {
+            Db::query(
+                "INSERT INTO sede_aplicativos (sede_id, aplicativo, elegida_por) VALUES (?, 'ASISTENCIA', ?)",
+                [$sede['id'], $admin['id']],
+            );
+            Db::query('UPDATE sedes SET updated_at = UTC_TIMESTAMP(3) WHERE id = ?', [$sede['id']]);
+        }
+        Response::json(['sede' => self::aJson($sede + ['elegida' => 1])]);
     }
 
     public static function actualizar(Request $req): never
@@ -70,6 +107,9 @@ final class SedesControlador
             'telefono'     => $s['telefono'] ?? null,
             'es_principal' => (bool) ($s['es_principal'] ?? false),
             'activo'       => (bool) ($s['activo'] ?? true),
+            // ¿La usa Presente? (y, en el listado del administrador, Ventario).
+            'elegida'          => (bool) ($s['elegida'] ?? true),
+            'elegida_ventario' => array_key_exists('elegida_ventario', $s) ? (bool) $s['elegida_ventario'] : null,
         ];
     }
 

@@ -116,9 +116,10 @@ class TarjetaEsteKiosco extends StatelessWidget {
   Widget build(BuildContext context) {
     final config = context.read<EstadoApp>().config;
     return Seccion(
-      titulo: 'Este kiosco',
+      titulo: 'Este teléfono',
       hijos: [
         Dato(icono: Icons.phone_android_rounded, etiqueta: 'Nombre', valor: config?.nombre ?? '—'),
+        Dato(icono: Icons.qr_code_2_rounded, etiqueta: 'Código', valor: config?.codigo ?? '—'),
         Dato(icono: Icons.location_on_outlined, etiqueta: 'Sede', valor: config?.sede.nombre ?? '—'),
         Dato(icono: Icons.dns_outlined, etiqueta: 'Servidor', valor: config?.url ?? '—'),
       ],
@@ -255,19 +256,19 @@ class TarjetaDesvincular extends StatelessWidget {
   Widget build(BuildContext context) {
     final sem = context.sem;
     return Seccion(
-      titulo: 'Cambiar de sede o desvincular',
+      titulo: 'Desvincular este teléfono',
       colorTitulo: sem.peligro,
       hijos: [
         Text(
-          'Desvincular borra de este teléfono el personal, los rostros y la configuración. '
-          'Luego podrás vincularlo a otra sede. Las marcaciones sin enviar se perderán.',
+          'Deja de ser punto de marcación y borra de él el personal y los rostros. '
+          'Para usarlo en otra sede, vuelve a iniciar sesión con la cuenta Operario. Las marcaciones sin enviar se perderán.',
           style: context.textos.bodyMedium?.copyWith(color: sem.textoSuave),
         ),
         const SizedBox(height: Espacio.md),
         OutlinedButton.icon(
           onPressed: () => _desvincular(context),
           icon: const Icon(Icons.link_off_rounded),
-          label: const Text('Desvincular dispositivo'),
+          label: const Text('Desvincular teléfono'),
           style: OutlinedButton.styleFrom(
             foregroundColor: sem.peligro,
             side: BorderSide(color: sem.peligro.withValues(alpha: 0.6)),
@@ -284,11 +285,11 @@ class TarjetaDesvincular extends StatelessWidget {
       context: context,
       builder: (c) => AlertDialog(
         icon: Icon(Icons.link_off_rounded, color: c.sem.peligro),
-        title: const Text('¿Desvincular este kiosco?'),
+        title: const Text('¿Desvincular este teléfono?'),
         content: Text(
           pendientes > 0
               ? 'Hay $pendientes marcaciones sin enviar que se perderán. Conéctate a internet y sincroniza primero si es posible.'
-              : 'Tendrás que volver a configurarlo con una cuenta General o Administrativa.',
+              : 'Aquí ya no se podrá marcar hasta que lo vinculen de nuevo con la cuenta Operario.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),

@@ -98,32 +98,50 @@ final class SistemaControlador
             'empresa' => self::empresaJson($persona['empresa_id']),
             'negocio' => self::nombreNegocio($persona['empresa_id']),
             'plan'    => Plan::deEmpresa($persona['empresa_id']),
+            'planes'  => Plan::planes($persona['empresa_id']),
         ]);
     }
 
-    /** Sedes visibles para la persona (todas las de su empresa, o las del gerente). */
+    /**
+     * Sedes visibles para la persona: las ELEGIDAS para Presente (todas, o las
+     * del gerente). Con ?todas=1 el administrador ve TODAS las de la empresa
+     * —también las que solo usa Ventario y las inactivas— con `elegida`, para
+     * elegir cuáles usa Presente.
+     */
     public static function sedes(Request $req): never
     {
         $persona = Auth::persona($req);
+        $todas = $req->query('todas') === '1' && $persona['rol_asistencia'] === Auth::ROL_ADMIN;
+        if ($todas) {
+            $filas = Db::filas(
+                "SELECT s.id, s.uuid, s.nombre, s.codigo, s.direccion, s.telefono, s.es_principal, s.activo,
+                        EXISTS (SELECT 1 FROM sede_aplicativos sa
+                                 WHERE sa.sede_id = s.id AND sa.aplicativo = 'ASISTENCIA') AS elegida,
+                        EXISTS (SELECT 1 FROM sede_aplicativos sa
+                                 WHERE sa.sede_id = s.id AND sa.aplicativo = 'INVENTARIO') AS elegida_ventario
+                   FROM sedes s
+                  WHERE s.empresa_id = ? AND s.deleted_at IS NULL
+                  ORDER BY s.es_principal DESC, s.nombre",
+                [$persona['empresa_id']],
+            );
+            Response::json(['sedes' => array_map([SedesControlador::class, 'aJson'], $filas)]);
+        }
         if ($persona['sedes'] === []) {
             Response::json(['sedes' => []]);
         }
         $filas = Db::filas(
-            'SELECT id, uuid, nombre, codigo, direccion, telefono, es_principal, activo
+            'SELECT id, uuid, nombre, codigo, direccion, telefono, es_principal, activo, 1 AS elegida
                FROM sedes
               WHERE empresa_id = ? AND deleted_at IS NULL AND id IN (' . Db::enLista($persona['sedes']) . ')
               ORDER BY es_principal DESC, nombre',
             [$persona['empresa_id'], ...$persona['sedes']],
         );
-        // Los kioscos y los formularios solo ofrecen las activas; el panel de
-        // sedes del administrador pide también las inactivas (?todas=1).
-        $todas = $req->query('todas') === '1' && $persona['rol_asistencia'] === Auth::ROL_ADMIN;
+        // Los teléfonos y los formularios solo ofrecen las activas.
         $sedes = [];
         foreach ($filas as $s) {
-            if (!$todas && (int) $s['activo'] !== 1) {
-                continue;
+            if ((int) $s['activo'] === 1) {
+                $sedes[] = SedesControlador::aJson($s);
             }
-            $sedes[] = SedesControlador::aJson($s);
         }
         Response::json(['sedes' => $sedes]);
     }

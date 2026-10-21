@@ -10,16 +10,21 @@ import '../../core/tema.dart';
 import '../../data/modelos.dart';
 import '../../servicios/estado_app.dart';
 import '../../servicios/sincronizador.dart';
-import '../admin/acceso_admin.dart';
 import '../comun/camara.dart';
 import '../comun/hud.dart';
 import '../comun/widgets.dart';
 import 'controlador_kiosco.dart';
 import 'paneles_kiosco.dart';
 
-/// Pantalla principal: el empleado llega, mira la cámara y queda registrado.
+/// Marcación: la persona mira la cámara y queda registrada.
+///
+/// Solo se abre desde «Marcar asistencia» en un teléfono vinculado, y se
+/// cierra sola tras registrar o tras [inactividad] sin nadie frente a la
+/// cámara: así la cámara no queda encendida todo el día.
 class KioscoPage extends StatefulWidget {
   const KioscoPage({super.key});
+
+  static const inactividad = Duration(seconds: 20);
 
   @override
   State<KioscoPage> createState() => _KioscoPageState();
@@ -27,7 +32,20 @@ class KioscoPage extends StatefulWidget {
 
 class _KioscoPageState extends State<KioscoPage> with WidgetsBindingObserver {
   late final ControladorKiosco _k = ControladorKiosco(context.read<EstadoApp>());
-  bool _enAdmin = false;
+  late final Timer _vigia;
+  DateTime _ultimaActividad = DateTime.now();
+  late int _pulsosVistos = _k.pulsos;
+  bool _cerrando = false;
+
+  /// Fases en las que alguien está frente a la cámara.
+  static const _conPersona = {
+    FaseKiosco.ajustando,
+    FaseKiosco.vivacidad,
+    FaseKiosco.analizando,
+    FaseKiosco.identificado,
+    FaseKiosco.registrado,
+    FaseKiosco.repetido,
+  };
 
   @override
   void initState() {
@@ -35,24 +53,28 @@ class _KioscoPageState extends State<KioscoPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _modoKiosco();
     WakelockPlus.enable();
+    _k.addListener(_alCambiar);
+    _vigia = Timer.periodic(const Duration(seconds: 1), (_) => _vigilar());
     _k.iniciar();
   }
 
   @override
   void dispose() {
+    _vigia.cancel();
+    _k.removeListener(_alCambiar);
     WidgetsBinding.instance.removeObserver(this);
-    WakelockPlus.disable();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _k.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
-    if (_enAdmin) return;
     if (s == AppLifecycleState.inactive || s == AppLifecycleState.paused) {
       _k.pausar();
     } else if (s == AppLifecycleState.resumed) {
       _modoKiosco();
+      _ultimaActividad = DateTime.now();
       _k.iniciar();
       context.read<EstadoApp>().sincronizador?.sincronizar();
     }
@@ -60,15 +82,27 @@ class _KioscoPageState extends State<KioscoPage> with WidgetsBindingObserver {
 
   void _modoKiosco() => SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-  Future<void> _abrirAdmin() async {
-    _enAdmin = true;
+  void _alCambiar() {
+    if (_k.rostro != null || _conPersona.contains(_k.fase)) _ultimaActividad = DateTime.now();
+    if (_k.pulsos != _pulsosVistos) {
+      // Registró: se deja ver la confirmación y se apaga la cámara.
+      _pulsosVistos = _k.pulsos;
+      _cerrar(tras: const Duration(milliseconds: 3400));
+    } else if (_k.fase == FaseKiosco.repetido) {
+      _cerrar(tras: const Duration(seconds: 4));
+    }
+  }
+
+  void _vigilar() {
+    if (DateTime.now().difference(_ultimaActividad) >= KioscoPage.inactividad) _cerrar();
+  }
+
+  Future<void> _cerrar({Duration tras = Duration.zero}) async {
+    if (_cerrando) return;
+    _cerrando = true;
+    if (tras > Duration.zero) await Future<void>.delayed(tras);
     await _k.pausar();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    if (mounted) await abrirAdministracion(context);
-    _enAdmin = false;
-    if (!mounted) return;
-    _modoKiosco();
-    await _k.iniciar();
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   @override
@@ -117,7 +151,7 @@ class _KioscoPageState extends State<KioscoPage> with WidgetsBindingObserver {
                         EncabezadoKiosco(
                           sede: estado.config?.sede.nombre ?? '',
                           sync: sync,
-                          alAdministrar: _abrirAdmin,
+                          alCerrar: _cerrar,
                         ),
                         if (sync.relojDesfasado) AvisoReloj(desfase: sync.desfaseReloj!),
                         const Spacer(),
@@ -136,12 +170,7 @@ class _KioscoPageState extends State<KioscoPage> with WidgetsBindingObserver {
                                   child: hijo,
                                 ),
                               ),
-                              child: PanelFase(
-                                key: ValueKey(_claveFase()),
-                                k: _k,
-                                sync: sync,
-                                alAdministrar: _abrirAdmin,
-                              ),
+                              child: PanelFase(key: ValueKey(_claveFase()), k: _k, sync: sync),
                             ),
                           ),
                         ),
@@ -196,13 +225,13 @@ Color colorFase(ControladorKiosco k) => switch (k.fase) {
       _ => Hud.cian,
     };
 
-/// Cabecera: sede, reloj grande, estado de sincronización y acceso admin.
+/// Cabecera: sede, reloj grande, estado de sincronización y cerrar (apaga la cámara).
 class EncabezadoKiosco extends StatelessWidget {
-  const EncabezadoKiosco({super.key, required this.sede, required this.sync, required this.alAdministrar});
+  const EncabezadoKiosco({super.key, required this.sede, required this.sync, required this.alCerrar});
 
   final String sede;
   final Sincronizador sync;
-  final VoidCallback alAdministrar;
+  final VoidCallback alCerrar;
 
   @override
   Widget build(BuildContext context) {
@@ -230,9 +259,9 @@ class EncabezadoKiosco extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               IconButton(
-                onPressed: alAdministrar,
-                tooltip: 'Administración',
-                icon: const Icon(Icons.admin_panel_settings_outlined, color: Hud.textoSuave),
+                onPressed: alCerrar,
+                tooltip: 'Cerrar y apagar la cámara',
+                icon: const Icon(Icons.close_rounded, color: Hud.textoSuave),
               ),
               EstadoSync(sync: sync),
             ],

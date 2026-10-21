@@ -26,6 +26,15 @@ class SesionAdminCtrl extends ChangeNotifier {
     return s;
   }
 
+  /// Sesión que ya abrió otra pantalla con la misma API (p. ej. el registro
+  /// de una empresa nueva).
+  void adoptar(SesionAdmin s) {
+    _sesion = s;
+    api?.tokenAdmin = s.token;
+    tocar();
+    notifyListeners();
+  }
+
   /// Reinicia el contador de inactividad (llamar en cada interacción).
   void tocar() {
     _inactividad?.cancel();

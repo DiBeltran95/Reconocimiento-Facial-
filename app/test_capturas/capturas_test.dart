@@ -20,6 +20,8 @@ import 'package:control_personal/ui/comun/hud.dart';
 import 'package:control_personal/ui/horarios/horarios_page.dart';
 import 'package:control_personal/ui/horarios/plan_empleado.dart';
 import 'package:control_personal/ui/horarios/turno_form_page.dart';
+import 'package:control_personal/ui/comun/widgets.dart';
+import 'package:control_personal/ui/inicio/inicio_page.dart';
 import 'package:control_personal/ui/kiosco/controlador_kiosco.dart';
 import 'package:control_personal/ui/kiosco/kiosco_page.dart';
 import 'package:control_personal/ui/kiosco/paneles_kiosco.dart';
@@ -336,9 +338,9 @@ Widget _kiosco(_KioscoFalso k, {bool registrado = false}) {
         ),
         SafeArea(
           child: Column(children: [
-            EncabezadoKiosco(sede: 'Sede principal', sync: sync, alAdministrar: () {}),
+            EncabezadoKiosco(sede: 'Sede principal', sync: sync, alCerrar: () {}),
             const Spacer(),
-            Padding(padding: const EdgeInsets.all(16), child: PanelFase(k: k, sync: sync, alAdministrar: () {})),
+            Padding(padding: const EdgeInsets.all(16), child: PanelFase(k: k, sync: sync)),
           ]),
         ),
         if (registrado)
@@ -351,7 +353,8 @@ Widget _kiosco(_KioscoFalso k, {bool registrado = false}) {
 }
 
 Widget _admin(Widget pagina, String titulo, {Brightness brillo = Brightness.dark}) {
-  final ctx = ContextoAdmin(api: _ApiFalsa(), sedeDispositivo: const Sede(id: 1, nombre: 'Sede principal', codigo: 'PRI'));
+  const sede = Sede(id: 1, nombre: 'Sede principal', codigo: 'PRI');
+  final ctx = ContextoAdmin(api: _ApiFalsa(), sedes: const [sede], sedeDispositivo: sede);
   return _app(
     ChangeNotifierProvider.value(
       value: ctx,
@@ -454,6 +457,37 @@ void main() {
 
   testWidgets('admin · asistencia (tema claro)', (t) async {
     await _capturar(t, '10_admin_asistencia_claro', _admin(const VistaDia(), 'Asistencia', brillo: Brightness.light));
+  });
+
+  testWidgets('inicio · sin vincular', (t) async {
+    await _capturar(t, '11_inicio_sin_vincular', _app(VistaInicioSinVincular(alIniciarSesion: () {}, alCrearCuenta: () {})));
+  });
+
+  testWidgets('inicio · teléfono de marcación', (t) async {
+    final hoy = DateTime.now();
+    MarcaDeHoy marca(int id, String nombre, TipoMarcacion tipo, int h, int m, {bool enviada = true}) => (
+          nombre: nombre,
+          marcacion: Marcacion(empleadoId: id, tipo: tipo, hora: DateTime(hoy.year, hoy.month, hoy.day, h, m), enviada: enviada),
+        );
+    await _capturar(
+      t,
+      '12_inicio_vinculado',
+      _app(VistaInicioVinculado(
+        sede: 'Sede principal',
+        telefono: 'Sede principal · Teléfono 1',
+        codigo: 'K7QD',
+        estadoSync: Pildora(texto: 'En línea', color: Hud.entrada, fondo: Hud.panel, icono: Icons.cloud_done_outlined),
+        reloj: Text('08:52', style: Hud.titulo(tam: 52, peso: FontWeight.w600)),
+        alMarcar: () {},
+        alAdministrar: () {},
+        marcas: [
+          marca(4, 'Valentina Ortiz', TipoMarcacion.entrada, 8, 52, enviada: false),
+          marca(1, 'Ana María Rojas', TipoMarcacion.entrada, 8, 41),
+          marca(2, 'Carlos Pérez', TipoMarcacion.salida, 8, 30),
+          marca(3, 'Luis Fernando Gómez', TipoMarcacion.entrada, 7, 58),
+        ],
+      )),
+    );
   });
 }
 

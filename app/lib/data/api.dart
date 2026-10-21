@@ -70,11 +70,13 @@ class Api {
     return query == null || query.isEmpty ? base : base.replace(queryParameters: query);
   }
 
-  Map<String, String> cabeceras({bool admin = false, bool json = true}) => {
+  /// [ambos]: la sesión de quien administra Y el token de este teléfono (para
+  /// desvincularlo desde el propio teléfono).
+  Map<String, String> cabeceras({bool admin = false, bool json = true, bool ambos = false}) => {
         'Accept': 'application/json',
         if (json) 'Content-Type': 'application/json; charset=utf-8',
-        if (admin && tokenAdmin != null) 'Authorization': 'Bearer $tokenAdmin',
-        if (!admin && tokenDispositivo != null) 'X-Dispositivo': tokenDispositivo!,
+        if ((admin || ambos) && tokenAdmin != null) 'Authorization': 'Bearer $tokenAdmin',
+        if ((!admin || ambos) && tokenDispositivo != null) 'X-Dispositivo': tokenDispositivo!,
       };
 
   Future<http.Response> _enviar(Future<http.Response> Function() peticion) async {
@@ -258,15 +260,39 @@ class Api {
     return Sede.desdeJson(j['sede'] as Map<String, dynamic>);
   }
 
-  Future<DispositivoRegistrado> registrarDispositivo(int sedeId, String nombre) async {
-    final j = await _post('/api/dispositivos', {'sede_id': sedeId, 'nombre': nombre}, admin: true)
-        as Map<String, dynamic>;
+  /// Convierte ESTE teléfono en punto de marcación de una sede. [instalacion]
+  /// lo identifica: volver a vincularlo reutiliza su registro (y su código) en
+  /// vez de duplicarlo. Sin [nombre], el servidor pone «Sede · Teléfono N».
+  Future<DispositivoRegistrado> registrarDispositivo(int sedeId, {required String instalacion, String? nombre}) async {
+    final j = await _post(
+      '/api/dispositivos',
+      {'sede_id': sedeId, 'instalacion_uuid': instalacion, if (nombre != null && nombre.isNotEmpty) 'nombre': nombre},
+      admin: true,
+    ) as Map<String, dynamic>;
     return DispositivoRegistrado(
       id: (j['id'] as num).toInt(),
       nombre: j['nombre'] as String,
       token: j['token'] as String,
       sede: Sede.desdeJson(j['sede'] as Map<String, dynamic>),
+      codigo: j['codigo'] as String?,
     );
+  }
+
+  /// Presente empieza a usar esta sede. No se puede deshacer.
+  Future<Sede> elegirSede(int id) async {
+    final j = await _post('/api/sedes/$id/elegir', const {}, admin: true) as Map<String, dynamic>;
+    return Sede.desdeJson(j['sede'] as Map<String, dynamic>);
+  }
+
+  /// Pausa o reactiva a una persona (reactivar exige cupo: LIMITE_PLAN).
+  Future<Empleado> pausarEmpleado(int id, {required bool pausada}) async {
+    final j = await _post('/api/empleados/$id/pausa', {'pausada': pausada}, admin: true) as Map<String, dynamic>;
+    return Empleado.desdeJson(j['empleado'] as Map<String, dynamic>);
+  }
+
+  Future<Usuario> pausarUsuario(int id, {required bool pausada}) async {
+    final j = await _post('/api/usuarios/$id/pausa', {'pausada': pausada}, admin: true) as Map<String, dynamic>;
+    return Usuario.desdeJson(j['usuario'] as Map<String, dynamic>);
   }
 
   Future<List<Empleado>> empleados({int? sedeId}) async {
@@ -444,6 +470,8 @@ class Api {
 
   Future<void> revocarKiosco(int id) => _delete('/api/dispositivos/$id', admin: true);
 
+  Future<void> renombrarKiosco(int id, String nombre) => _put('/api/dispositivos/$id', {'nombre': nombre}, admin: true);
+
   /// URL + cabeceras para mostrar una foto con Image.network.
   ({String url, Map<String, String> cabeceras}) foto(int empleadoId, int n, int v, {bool admin = true}) => (
         url: uri('/api/empleados/$empleadoId/fotos/$n', {'v': '$v'}).toString(),
@@ -459,7 +487,10 @@ class Api {
     return Sede.desdeJson(j['sede'] as Map<String, dynamic>);
   }
 
-  Future<void> kioscoDesvincular() => _delete('/api/kiosco/yo');
+  /// Solo con la sesión de un administrador, gerente o talento humano: quien
+  /// pasa por el teléfono (o el operario) no puede quitarlo.
+  Future<void> kioscoDesvincular() async =>
+      _procesar(await _enviar(() => _http.delete(uri('/api/kiosco/yo'), headers: cabeceras(ambos: true))));
 
   /// Plantilla de empleados de la sede. Devuelve null si nada cambió (304).
   Future<PlantillaSede?> kioscoEmpleados({String? etag}) async {

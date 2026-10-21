@@ -40,8 +40,8 @@ class SelectorSede extends StatelessWidget {
           DropdownMenuEntry(
             value: s.id,
             label: s.nombre,
-            trailingIcon: s.id == ctx.sedeDispositivo.id
-                ? Tooltip(message: 'Sede de este kiosco', child: Icon(Icons.phone_android_rounded, size: 18, color: context.colores.primary))
+            trailingIcon: s.id == ctx.sedeDispositivo?.id
+                ? Tooltip(message: 'Sede de este teléfono', child: Icon(Icons.phone_android_rounded, size: 18, color: context.colores.primary))
                 : null,
           ),
       ],

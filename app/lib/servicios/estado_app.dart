@@ -11,10 +11,15 @@ import 'config_dispositivo.dart';
 import 'sesion_admin.dart';
 import 'sincronizador.dart';
 
-/// Raíz de la aplicación: decide si el teléfono ya está vinculado a una sede
-/// y mantiene vivos los servicios compartidos.
+/// Raíz de la aplicación: sabe si este teléfono es un punto de marcación
+/// (vinculado a una sede) y mantiene vivos los servicios compartidos.
+///
+/// La API existe siempre: en un teléfono sin vincular también se inicia
+/// sesión (para administrar o para vincularlo con la cuenta Operario).
 class EstadoApp extends ChangeNotifier {
-  EstadoApp._(this.almacen, this.ajustes, this.motor, this.errorMotor);
+  EstadoApp._(this.almacen, this.ajustes, this.motor, this.errorMotor, this.api) {
+    sesion.api = api;
+  }
 
   final AlmacenLocal almacen;
   final Ajustes ajustes;
@@ -22,15 +27,16 @@ class EstadoApp extends ChangeNotifier {
   final String? errorMotor;
   final Comparador comparador = Comparador();
   final SesionAdminCtrl sesion = SesionAdminCtrl();
+  final Api api;
 
   ConfigDispositivo? config;
-  Api? api;
   Sincronizador? sincronizador;
   Asistencia? asistencia;
 
   /// Mensaje a mostrar si el servidor desvinculó este dispositivo.
   String? avisoDesvinculado;
 
+  /// ¿Este teléfono es un punto de marcación?
   bool get configurado => config != null && sincronizador != null;
 
   static Future<EstadoApp> iniciar() async {
@@ -47,30 +53,49 @@ class EstadoApp extends ChangeNotifier {
       debugPrint('No se pudo cargar el modelo facial: $e');
     }
 
-    final estado = EstadoApp._(almacen, ajustes, motor, error);
     final config = await ConfigDispositivo.cargar();
+    final url = config?.url ?? await ConfigDispositivo.ultimaUrl() ?? Api.urlPorDefecto;
+    final estado = EstadoApp._(almacen, ajustes, motor, error, Api(baseUrl: url));
     if (config != null) await estado._activar(config);
     return estado;
   }
 
-  /// Completa la vinculación (desde el asistente de configuración).
-  Future<void> vincular(ConfigDispositivo nueva) async {
+  /// Solo en un teléfono sin vincular (instalaciones propias de la empresa).
+  Future<void> cambiarServidor(String url) async {
+    if (configurado) return;
+    api.baseUrl = Api.normalizarUrl(url);
+    await ConfigDispositivo.recordarUrl(api.baseUrl);
+    notifyListeners();
+  }
+
+  /// Este teléfono queda como punto de marcación de [registro.sede].
+  Future<void> vincular(DispositivoRegistrado registro) async {
+    final nueva = ConfigDispositivo(
+      url: api.baseUrl,
+      token: registro.token,
+      sede: registro.sede,
+      nombre: registro.nombre,
+      codigo: registro.codigo,
+    );
     await nueva.guardar();
     await ConfigDispositivo.recordarUrl(nueva.url);
+    avisoDesvinculado = null;
     await _activar(nueva);
     notifyListeners();
   }
 
   Future<void> _activar(ConfigDispositivo c) async {
+    sincronizador?.dispose();
     config = c;
-    api = Api(baseUrl: c.url, tokenDispositivo: c.token);
-    sesion.api = api;
+    api
+      ..baseUrl = c.url
+      ..tokenDispositivo = c.token;
     final sync = Sincronizador(
-      api: api!,
+      api: api,
       almacen: almacen,
       motor: motor,
       comparador: comparador,
-      alRevocar: () => desvincular(aviso: 'Un administrador desvinculó este dispositivo.'),
+      alRevocar: () => desvincular(aviso: 'Un administrador desvinculó este teléfono.'),
       alCambiarSede: _actualizarSede,
     );
     sincronizador = sync;
@@ -86,20 +111,20 @@ class EstadoApp extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Borra todo rastro local (empleados, rostros, cola) y vuelve al asistente.
+  /// Borra todo rastro local (empleados, rostros, cola) y el teléfono vuelve
+  /// a ser uno cualquiera: ya no se puede marcar en él.
   Future<void> desvincular({String? aviso, bool avisarServidor = false}) async {
     if (config == null) return;
     if (avisarServidor) {
       try {
-        await api?.kioscoDesvincular();
+        await api.kioscoDesvincular();
       } catch (_) {}
     }
     sesion.cerrar();
     sincronizador?.dispose();
     sincronizador = null;
     asistencia = null;
-    api?.cerrar();
-    api = null;
+    api.tokenDispositivo = null;
     config = null;
     comparador.cargar(const []);
     await almacen.borrarTodo();

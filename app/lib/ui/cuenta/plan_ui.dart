@@ -194,7 +194,7 @@ Future<bool> manejarLimite(BuildContext context, Api api, Object error) async {
   return true;
 }
 
-/// Tarjeta con el plan vigente y sus tres medidores.
+/// Tarjeta con el plan vigente de una app y sus medidores.
 class TarjetaPlan extends StatelessWidget {
   const TarjetaPlan({super.key, required this.plan});
   final PlanEmpresa plan;
@@ -204,7 +204,7 @@ class TarjetaPlan extends StatelessWidget {
     final sem = context.sem;
     final vence = plan.vence;
     return Seccion(
-      titulo: 'Tu plan',
+      titulo: 'Plan de ${plan.nombreApp}',
       hijos: [
         Row(
           children: [
@@ -219,20 +219,22 @@ class TarjetaPlan extends StatelessWidget {
           const SizedBox(height: Espacio.xxs),
           Text(
             plan.vencido
-                ? 'Venció el ${_fecha(vence)}: la empresa opera con los límites del plan Gratis.'
+                ? 'Venció el ${_fecha(vence)}: ${plan.nombreApp} opera con los límites del plan Gratis.'
                 : 'Vigente hasta el ${_fecha(vence)}',
             style: context.textos.bodySmall?.copyWith(color: plan.vencido ? sem.alerta : sem.textoSuave),
           ),
         ],
         const SizedBox(height: Espacio.md),
-        for (final r in RecursoLimitado.values) ...[
+        for (final r in plan.recursos) ...[
           MedidorUso(recurso: r, uso: plan.de(r)),
-          if (r != RecursoLimitado.values.last) const SizedBox(height: Espacio.md),
+          if (r != plan.recursos.last) const SizedBox(height: Espacio.md),
         ],
         const SizedBox(height: Espacio.md),
         Text(
-          'Las personas incluyen a gerentes y a quienes solo marcan asistencia. Para ampliar tu plan, '
-          'el administrador de la empresa puede solicitarlo al equipo de la plataforma.',
+          plan.esPresente
+              ? 'Las personas incluyen a gerentes, talento humano y a quienes solo marcan asistencia. '
+                  'Cada app tiene su propio plan: para ampliarlo, el administrador lo solicita al equipo de la plataforma.'
+              : 'Cada app tiene su propio plan: para ampliarlo, el administrador lo solicita al equipo de la plataforma.',
           style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
         ),
       ],
