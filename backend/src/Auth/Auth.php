@@ -7,48 +7,65 @@ use App\Config;
 use App\Db;
 use App\Http\HttpError;
 use App\Http\Request;
+use App\Servicios\Horarios;
+use App\Servicios\Tiempo;
 
 /**
- * Credenciales:
- *  - Personas (JWT en `Authorization: Bearer …`), con dos roles:
- *      GENERAL         → vincula y opera kioscos en cualquier sede.
- *      ADMINISTRATIVO  → todo: personal, horarios, cumplimiento, usuarios.
- *    Las cuentas viven en `asis_usuarios`. Además, los ADMIN / GERENTE de la
- *    tabla existente `usuarios` (solo lectura) entran como ADMINISTRATIVO.
- *  - Dispositivo (kiosco): token opaco en `X-Dispositivo`; en la BD solo su SHA-256.
+ * Credenciales en la plataforma multiempresa:
+ *
+ *  - Personas (JWT en `Authorization: Bearer …`). Una sola tabla `usuarios`
+ *    para Inventario y Control de Personal; en esta app cuenta `rol_asistencia`:
+ *      ADMIN     → todo dentro de su empresa (sedes, personal, horarios,
+ *                  reportes, cuentas, kioscos).
+ *      GERENTE   → personal, horarios y reportes de SUS sedes (usuario_sedes,
+ *                  las mismas que en Inventario).
+ *      OPERADOR  → vincula y atiende kioscos en cualquier sede de la empresa.
+ *    Inactivar la cuenta la saca de las dos apps. Para entrar, además, la
+ *    empresa debe estar activa y tener habilitada la app ASISTENCIA.
+ *
+ *    Hacia la app se conserva el rol de siempre: ADMIN y GERENTE se presentan
+ *    como ADMINISTRATIVO (con `sedes` acotando al gerente) y OPERADOR como
+ *    GENERAL. `rol_asistencia` va aparte para lo que solo hace el ADMIN.
+ *
+ *  - Superadministrador de la plataforma (`es_superadmin`): sin empresa; solo
+ *    entra al panel de plataforma (`Auth::superadmin`).
+ *
+ *  - Dispositivo (kiosco): token opaco en `X-Dispositivo`; en la BD solo su
+ *    SHA-256. Pertenece a una sede, y por ella a una empresa.
  */
 final class Auth
 {
     public const GENERAL = 'GENERAL';
     public const ADMINISTRATIVO = 'ADMINISTRATIVO';
 
-    /** Origen de la cuenta dentro del JWT. */
-    public const ORIGEN_ASISTENCIA = 'a';
-    public const ORIGEN_INVENTARIO = 'i';
+    public const ROL_ADMIN = 'ADMIN';
+    public const ROL_GERENTE = 'GERENTE';
+    public const ROL_OPERADOR = 'OPERADOR';
+    public const ROLES_ASISTENCIA = [self::ROL_ADMIN, self::ROL_GERENTE, self::ROL_OPERADOR];
 
     /**
-     * Cualquier persona autenticada (GENERAL o ADMINISTRATIVO).
-     * @return array{id:int, nombre:string, rol:string, origen:string, sedes:?array<int>}
-     *         `sedes` = null significa "todas las sedes".
+     * Cualquier persona autenticada de una empresa (GENERAL o ADMINISTRATIVO).
+     * @return array{id:int, uuid:string, nombre:string, email:string, rol:string,
+     *               rol_asistencia:string, rol_inventario:?string, empresa_id:int, sedes:array<int>}
+     *   `sedes` son SIEMPRE ids de la empresa: todas para el ADMIN, las suyas
+     *   para el GERENTE. Nunca «todas las de la base».
      */
     public static function persona(Request $req): array
     {
-        $token = $req->bearer();
-        $datos = $token !== null ? Jwt::verificar($token, (string) Config::get('jwt_secret')) : null;
-        if ($datos === null || !isset($datos['sub'], $datos['org'])) {
-            throw HttpError::noAutorizado();
+        $datos = self::token($req);
+        if (!empty($datos['sa'])) {
+            throw new HttpError(403, 'El superadministrador entra solo al panel de plataforma');
         }
-        // Se revalida en cada petición: si desactivan la cuenta, la sesión muere ya.
-        $persona = $datos['org'] === self::ORIGEN_ASISTENCIA
-            ? self::cuentaAsistencia((int) $datos['sub'])
-            : self::cuentaInventario((int) $datos['sub']);
+        // Se revalida en cada petición: si desactivan la cuenta o la empresa,
+        // la sesión muere ya, no cuando venza el token.
+        $persona = self::cargar((int) $datos['sub']);
         if ($persona === null) {
             throw HttpError::noAutorizado('Tu usuario ya no tiene acceso');
         }
         return $persona;
     }
 
-    /** Solo administrativos. */
+    /** ADMIN o GERENTE (administrativos). El gerente queda acotado a sus sedes. */
     public static function admin(Request $req): array
     {
         $persona = self::persona($req);
@@ -58,81 +75,137 @@ final class Auth
         return $persona;
     }
 
-    /** Busca y valida credenciales. Devuelve la persona o null. */
-    public static function autenticar(string $usuario, string $password): ?array
+    /** Solo el ADMIN de la empresa (sedes, cuentas, turnos, datos de la empresa). */
+    public static function adminEmpresa(Request $req): array
     {
-        $cuenta = Db::fila(
-            'SELECT id, password_hash, activo FROM asis_usuarios WHERE usuario = ?',
-            [$usuario],
-        );
-        if ($cuenta !== null) {
-            if (!self::verificarPassword($password, (string) $cuenta['password_hash'])) {
-                return null;
-            }
-            if ((int) $cuenta['activo'] !== 1) {
-                throw new HttpError(403, 'Tu usuario está inactivo');
-            }
-            return self::cuentaAsistencia((int) $cuenta['id']);
+        $persona = self::persona($req);
+        if ($persona['rol_asistencia'] !== self::ROL_ADMIN) {
+            throw new HttpError(403, 'Esta opción es solo para el administrador de la empresa');
         }
-
-        // Respaldo: administradores del sistema de inventarios (solo lectura).
-        $inv = Db::fila(
-            'SELECT id, password_hash, activo, rol FROM usuarios WHERE email = ? AND deleted_at IS NULL LIMIT 1',
-            [$usuario],
-        );
-        if ($inv === null || !self::verificarPassword($password, (string) $inv['password_hash'])) {
-            return null;
-        }
-        if ((int) $inv['activo'] !== 1) {
-            throw new HttpError(403, 'Tu usuario está inactivo');
-        }
-        if (!in_array($inv['rol'], Config::get('roles_admin', []), true)) {
-            throw new HttpError(403, 'Tu rol no tiene acceso al control de asistencia');
-        }
-        return self::cuentaInventario((int) $inv['id']);
+        return $persona;
     }
 
-    private static function cuentaAsistencia(int $id): ?array
+    /** Superadministrador de la plataforma. */
+    public static function superadmin(Request $req): array
     {
-        $u = Db::fila('SELECT id, nombre, rol FROM asis_usuarios WHERE id = ? AND activo = 1', [$id]);
-        if ($u === null) {
-            return null;
+        $datos = self::token($req);
+        $u = Db::fila(
+            'SELECT id, nombre, email FROM usuarios
+              WHERE id = ? AND es_superadmin = 1 AND activo = 1 AND deleted_at IS NULL',
+            [(int) $datos['sub']],
+        );
+        if ($u === null || empty($datos['sa'])) {
+            throw new HttpError(403, 'Solo para el equipo de la plataforma');
         }
-        return [
-            'id'     => (int) $u['id'],
-            'nombre' => (string) $u['nombre'],
-            'rol'    => (string) $u['rol'],
-            'origen' => self::ORIGEN_ASISTENCIA,
-            'sedes'  => null,
-        ];
+        return ['id' => (int) $u['id'], 'nombre' => (string) $u['nombre'], 'email' => (string) $u['email']];
     }
 
-    private static function cuentaInventario(int $id): ?array
+    private static function token(Request $req): array
+    {
+        $token = $req->bearer();
+        $datos = $token !== null ? Jwt::verificar($token, (string) Config::get('jwt_secret')) : null;
+        if ($datos === null || !isset($datos['sub'])) {
+            throw HttpError::noAutorizado();
+        }
+        return $datos;
+    }
+
+    /**
+     * Busca y valida credenciales. Devuelve la persona o null si la contraseña
+     * no coincide. Con la contraseña correcta sí se explica por qué no entra
+     * (cuenta inactiva, empresa suspendida, app no habilitada, sin rol aquí):
+     * es la misma persona y saberlo le ahorra una llamada.
+     *
+     * @return array|null  persona, o ['superadmin' => true, 'id' => …] para el panel de plataforma
+     */
+    public static function autenticar(string $email, string $password): ?array
     {
         $u = Db::fila(
-            'SELECT id, nombre, rol FROM usuarios WHERE id = ? AND activo = 1 AND deleted_at IS NULL',
-            [$id],
+            'SELECT id, password_hash, es_superadmin FROM usuarios WHERE email = ? AND deleted_at IS NULL LIMIT 1',
+            [$email],
         );
-        if ($u === null || !in_array($u['rol'], Config::get('roles_admin', []), true)) {
+        if ($u === null || !self::verificarPassword($password, (string) $u['password_hash'])) {
             return null;
         }
-        $sedes = null;
-        if ($u['rol'] !== 'ADMIN') {
-            $sedes = array_map('intval', array_column(
-                Db::filas('SELECT sede_id FROM usuario_sedes WHERE usuario_id = ?', [$u['id']]),
-                'sede_id',
-            ));
+        if ((int) $u['es_superadmin'] === 1) {
+            return ['superadmin' => true, 'id' => (int) $u['id']];
         }
+        return self::cargar((int) $u['id'], true);
+    }
+
+    /**
+     * Cuenta + empresa + permisos. Con `$explicar`, lanza el motivo exacto por
+     * el que no puede entrar; sin él (cada petición), solo devuelve null.
+     */
+    private static function cargar(int $id, bool $explicar = false): ?array
+    {
+        $u = Db::fila(
+            "SELECT u.id, u.uuid, u.nombre, u.email, u.rol AS rol_inventario, u.rol_asistencia,
+                    u.activo, u.empresa_id, e.estado AS empresa_estado, e.deleted_at AS empresa_borrada,
+                    e.zona_horaria, ea.activo AS app_habilitada
+               FROM usuarios u
+               LEFT JOIN empresas e ON e.id = u.empresa_id
+               LEFT JOIN empresa_aplicativos ea ON ea.empresa_id = u.empresa_id AND ea.aplicativo = 'ASISTENCIA'
+              WHERE u.id = ? AND u.deleted_at IS NULL AND u.es_superadmin = 0",
+            [$id],
+        );
+        $motivo = match (true) {
+            $u === null                         => ['Tu usuario ya no existe', 'USUARIO_INEXISTENTE'],
+            (int) $u['activo'] !== 1            => ['Tu usuario está inactivo', 'CUENTA_DESACTIVADA'],
+            $u['empresa_id'] === null || $u['empresa_borrada'] !== null
+                                                => ['Tu empresa ya no está registrada en la plataforma', 'EMPRESA_INEXISTENTE'],
+            $u['empresa_estado'] !== 'ACTIVA'   => ['Tu empresa está suspendida. Comunícate con el equipo de la plataforma.', 'EMPRESA_SUSPENDIDA'],
+            (int) ($u['app_habilitada'] ?? 0) !== 1
+                                                => ['Tu empresa no tiene habilitado Control de Personal', 'APP_NO_HABILITADA'],
+            $u['rol_asistencia'] === null       => ['Tu cuenta no tiene acceso a Control de Personal. Pídeselo al administrador de tu empresa.', 'SIN_ACCESO_APP'],
+            default                             => null,
+        };
+        if ($motivo !== null) {
+            if ($explicar) {
+                throw new HttpError(403, $motivo[0], ['codigo' => $motivo[1]]);
+            }
+            return null;
+        }
+
+        $empresaId = (int) $u['empresa_id'];
+        Tiempo::usarZona((string) $u['zona_horaria']);
+        Horarios::usarEmpresa($empresaId);
+        $rolAsis = (string) $u['rol_asistencia'];
         return [
-            'id'     => (int) $u['id'],
-            'nombre' => (string) $u['nombre'],
-            'rol'    => self::ADMINISTRATIVO,
-            'origen' => self::ORIGEN_INVENTARIO,
-            'sedes'  => $sedes,
+            'id'             => (int) $u['id'],
+            'uuid'           => (string) $u['uuid'],
+            'nombre'         => (string) $u['nombre'],
+            'email'          => (string) $u['email'],
+            'rol'            => $rolAsis === self::ROL_OPERADOR ? self::GENERAL : self::ADMINISTRATIVO,
+            'rol_asistencia' => $rolAsis,
+            'rol_inventario' => $u['rol_inventario'],
+            'empresa_id'     => $empresaId,
+            'sedes'          => self::sedesDe((int) $u['id'], $empresaId, $rolAsis),
         ];
     }
 
-    /** @return array{id:int, nombre:string, sede_id:int, sede_nombre:string, sede_codigo:string} */
+    /**
+     * Sedes del alcance, todas de la empresa. El ADMIN y el OPERADOR (atiende
+     * cualquier kiosco) las ven todas, también las archivadas: el historial
+     * las necesita. El GERENTE, las suyas.
+     * @return array<int>
+     */
+    private static function sedesDe(int $usuarioId, int $empresaId, string $rol): array
+    {
+        if ($rol === self::ROL_GERENTE) {
+            $filas = Db::filas(
+                'SELECT us.sede_id FROM usuario_sedes us
+                   JOIN sedes s ON s.id = us.sede_id AND s.empresa_id = ? AND s.deleted_at IS NULL
+                  WHERE us.usuario_id = ?',
+                [$empresaId, $usuarioId],
+            );
+        } else {
+            $filas = Db::filas('SELECT id AS sede_id FROM sedes WHERE empresa_id = ?', [$empresaId]);
+        }
+        return array_map('intval', array_column($filas, 'sede_id'));
+    }
+
+    /** @return array{id:int, nombre:string, sede_id:int, sede_nombre:string, sede_codigo:string, empresa_id:int} */
     public static function dispositivo(Request $req): array
     {
         $token = $req->header('X-Dispositivo');
@@ -140,21 +213,34 @@ final class Auth
             throw HttpError::noAutorizado('Dispositivo no registrado');
         }
         $disp = Db::fila(
-            'SELECT d.id, d.nombre, d.sede_id, s.nombre AS sede_nombre, s.codigo AS sede_codigo
+            "SELECT d.id, d.nombre, d.sede_id, s.nombre AS sede_nombre, s.codigo AS sede_codigo,
+                    s.empresa_id, e.estado AS empresa_estado, e.deleted_at AS empresa_borrada,
+                    e.zona_horaria, ea.activo AS app_habilitada
                FROM asis_dispositivos d
                JOIN sedes s ON s.id = d.sede_id
-              WHERE d.token_hash = ? AND d.activo = 1',
+               JOIN empresas e ON e.id = s.empresa_id
+               LEFT JOIN empresa_aplicativos ea ON ea.empresa_id = e.id AND ea.aplicativo = 'ASISTENCIA'
+              WHERE d.token_hash = ? AND d.activo = 1",
             [hash('sha256', $token)],
         );
         if ($disp === null) {
             throw new HttpError(401, 'Este dispositivo fue desvinculado', ['codigo' => 'DISPOSITIVO_REVOCADO']);
         }
+        if ($disp['empresa_borrada'] !== null || $disp['empresa_estado'] !== 'ACTIVA') {
+            throw new HttpError(403, 'La empresa de este kiosco está suspendida', ['codigo' => 'EMPRESA_SUSPENDIDA']);
+        }
+        if ((int) ($disp['app_habilitada'] ?? 0) !== 1) {
+            throw new HttpError(403, 'La empresa no tiene habilitado Control de Personal', ['codigo' => 'APP_NO_HABILITADA']);
+        }
+        Tiempo::usarZona((string) $disp['zona_horaria']);
+        Horarios::usarEmpresa((int) $disp['empresa_id']);
         return [
             'id'          => (int) $disp['id'],
             'nombre'      => (string) $disp['nombre'],
             'sede_id'     => (int) $disp['sede_id'],
             'sede_nombre' => (string) $disp['sede_nombre'],
             'sede_codigo' => (string) $disp['sede_codigo'],
+            'empresa_id'  => (int) $disp['empresa_id'],
         ];
     }
 
@@ -169,7 +255,7 @@ final class Auth
 
     public static function puedeSede(array $persona, int $sedeId): bool
     {
-        return $persona['sedes'] === null || in_array($sedeId, $persona['sedes'], true);
+        return in_array($sedeId, $persona['sedes'], true);
     }
 
     public static function exigirSede(array $persona, int $sedeId): void

@@ -23,8 +23,8 @@
       <p class="suave">Personal, horarios, cumplimiento y reportes. Requiere una cuenta Administrativa.</p>
       <form id="form-login" novalidate>
         <label class="campo">
-          <span>Usuario o correo</span>
-          <input name="usuario" autocomplete="username" autocapitalize="none" required>
+          <span>Correo</span>
+          <input name="usuario" type="email" inputmode="email" autocomplete="username" autocapitalize="none" required>
         </label>
         <label class="campo">
           <span>Contraseña</span>
@@ -281,11 +281,11 @@
       </header>
       <div class="dialogo__cuerpo">
         <fieldset class="campo segmento"><legend>Tipo de cuenta</legend>
-          <label><input type="radio" name="rol" value="GENERAL" checked><span>General</span></label>
-          <label><input type="radio" name="rol" value="ADMINISTRATIVO"><span>Administrativo</span></label>
+          <label><input type="radio" name="rol" value="GENERAL" checked><span>Operador de kioscos</span></label>
+          <label><input type="radio" name="rol" value="ADMINISTRATIVO"><span>Administrador</span></label>
         </fieldset>
         <label class="campo"><span>Nombre completo</span><input name="nombre" required maxlength="120"></label>
-        <label class="campo"><span>Usuario para ingresar</span><input name="usuario" required maxlength="60" autocapitalize="none" autocomplete="off"><small class="ayuda">Ej.: kiosco.centro · sin espacios</small></label>
+        <label class="campo"><span>Correo para ingresar</span><input name="usuario" type="email" inputmode="email" required maxlength="191" autocapitalize="none" autocomplete="off"><small class="ayuda">Con este correo entra a las apps de la plataforma</small></label>
         <label class="campo"><span id="etq-clave">Contraseña</span><input type="password" name="password" autocomplete="new-password" minlength="8"><small class="ayuda">Mínimo 8 caracteres</small></label>
         <label class="check" id="fila-activo" hidden><input type="checkbox" name="activo" checked><span>Cuenta activa</span></label>
         <p class="error" id="usuario-error" role="alert" hidden></p>

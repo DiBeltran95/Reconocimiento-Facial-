@@ -56,7 +56,7 @@ class CamaraFrontal {
         'CameraAccessDenied' ||
         'CameraAccessDeniedWithoutPrompt' ||
         'CameraAccessRestricted' =>
-          'Sin permiso de cámara. Actívalo en Ajustes del teléfono › Aplicaciones › Control Personal.',
+          'Sin permiso de cámara. Actívalo en Ajustes del teléfono › Aplicaciones › Presente.',
         'SinCamara' => 'Este dispositivo no tiene cámara frontal.',
         _ => 'No se pudo abrir la cámara (${e.description ?? e.code}).',
       };

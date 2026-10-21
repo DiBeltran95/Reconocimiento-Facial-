@@ -4,9 +4,10 @@ import 'package:provider/provider.dart';
 import '../../core/tema.dart';
 import '../../servicios/estado_app.dart';
 import '../comun/widgets.dart';
+import '../cuenta/mi_empresa_page.dart';
 import 'componentes_kiosco.dart';
 
-/// Panel del usuario GENERAL: solo lo necesario para operar el kiosco.
+/// Panel del operador de kioscos: solo lo necesario para operar el kiosco.
 class OperadorPage extends StatefulWidget {
   const OperadorPage({super.key});
 
@@ -75,10 +76,10 @@ class _OperadorPageState extends State<OperadorPage> {
               Card(
                 child: ListTile(
                   leading: Icon(Icons.info_outline_rounded, color: context.colores.primary),
-                  title: const Text('Cuenta General'),
+                  title: const Text('Operador de kioscos'),
                   subtitle: const Text(
                     'Puedes sincronizar este kiosco, revisar las marcaciones de hoy y cambiarlo de sede. '
-                    'El personal, los horarios y los reportes los gestiona un usuario Administrativo.',
+                    'El personal, los horarios y los reportes los gestiona un administrador o gerente.',
                   ),
                 ),
               ),
@@ -90,6 +91,16 @@ class _OperadorPageState extends State<OperadorPage> {
               const MarcacionesDeHoy(),
               const SizedBox(height: Espacio.md),
               const TarjetaDesvincular(),
+              const SizedBox(height: Espacio.md),
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.business_outlined, color: context.colores.primary),
+                  title: Text(sesion?.empresa?.nombre ?? 'Mi empresa'),
+                  subtitle: const Text('Plan, apps habilitadas y tu cuenta'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MiEmpresaPage())),
+                ),
+              ),
             ],
           ),
         ),

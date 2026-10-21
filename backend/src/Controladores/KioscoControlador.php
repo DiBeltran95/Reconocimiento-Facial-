@@ -28,9 +28,14 @@ final class KioscoControlador
         $disp = Auth::dispositivo($req);
         Db::query('UPDATE asis_dispositivos SET ultimo_sync = UTC_TIMESTAMP() WHERE id = ?', [$disp['id']]);
 
+        // Un empleado ligado a una cuenta inactiva (la desactivaron en
+        // cualquiera de las dos apps) deja de bajar: ya no puede marcar.
         $filas = Db::filas(
-            'SELECT id, documento, nombre, cargo FROM asis_empleados
-              WHERE sede_id = ? AND activo = 1 ORDER BY nombre',
+            'SELECT e.id, e.documento, e.nombre, e.cargo FROM asis_empleados e
+               LEFT JOIN usuarios u ON u.id = e.usuario_id
+              WHERE e.sede_id = ? AND e.activo = 1
+                AND (e.usuario_id IS NULL OR (u.activo = 1 AND u.deleted_at IS NULL))
+              ORDER BY e.nombre',
             [$disp['sede_id']],
         );
         // Turno de HOY: el kiosco le dice a cada quien si llegó a tiempo.
@@ -100,8 +105,15 @@ final class KioscoControlador
             static fn ($m) => is_array($m) ? (int) ($m['empleado_id'] ?? 0) : 0,
             $lote,
         ))));
+        // Solo empleados de la EMPRESA del kiosco: nunca alguien de otra. No se
+        // exige que siga activo ni en esta sede: una marca hecha sin red antes
+        // de darlo de baja o de cambiarlo de sede es un hecho y no se pierde (el
+        // kiosco solo lo tenía si estaba activo aquí cuando sincronizó).
         $existentes = $ids === [] ? [] : array_flip(array_map('intval', array_column(
-            Db::filas('SELECT id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ')', $ids),
+            Db::filas(
+                'SELECT id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
+                [...$ids, $disp['empresa_id']],
+            ),
             'id',
         )));
 

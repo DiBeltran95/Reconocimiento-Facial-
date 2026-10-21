@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; script-src 'self'; frame-ancestors 'none'">
+  <title>Panel de plataforma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap">
+  <link rel="stylesheet" href="../panel/app.css">
+  <link rel="stylesheet" href="plataforma.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322D3EE' stroke-width='2' stroke-linecap='round'%3E%3Crect x='3' y='3' width='7' height='7' rx='1'/%3E%3Crect x='14' y='3' width='7' height='7' rx='1'/%3E%3Crect x='3' y='14' width='7' height='7' rx='1'/%3E%3Crect x='14' y='14' width='7' height='7' rx='1'/%3E%3C/svg%3E">
+</head>
+<body>
+  <!-- ============================ ACCESO ============================ -->
+  <main id="vista-login" class="login" hidden>
+    <div class="login__tarjeta">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-plataforma"/></svg></div>
+      <p class="etiqueta">Equipo de la plataforma</p>
+      <h1>Panel de plataforma</h1>
+      <p class="suave">Empresas, planes y apps habilitadas. Solo para el superadministrador.</p>
+      <form id="form-login" novalidate>
+        <label class="campo">
+          <span>Correo</span>
+          <input name="email" type="email" inputmode="email" autocomplete="username" autocapitalize="none" required>
+        </label>
+        <label class="campo">
+          <span>Contraseña</span>
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <p class="error" id="login-error" role="alert" hidden></p>
+        <button class="btn btn--primario btn--bloque" type="submit">Entrar</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- ============================ APLICACIÓN ============================ -->
+  <div id="vista-app" class="app" hidden>
+    <header class="barra">
+      <div class="barra__marca">
+        <div class="logo logo--chico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#i-plataforma"/></svg></div>
+        <div>
+          <p class="etiqueta">Superadministrador</p>
+          <p class="barra__titulo">Panel de plataforma</p>
+        </div>
+      </div>
+      <div class="barra__usuario">
+        <button class="btn-icono" id="btn-tema" type="button" aria-label="Cambiar tema claro u oscuro">
+          <svg viewBox="0 0 24 24"><use href="#i-tema"/></svg>
+        </button>
+        <button class="btn btn--fantasma" id="btn-salir" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-salir"/></svg>Salir
+        </button>
+      </div>
+    </header>
+
+    <nav class="pestanas" role="tablist" aria-label="Secciones">
+      <button role="tab" aria-selected="true" aria-controls="seccion-empresas" id="tab-empresas" data-seccion="empresas">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-edificio"/></svg>Empresas
+      </button>
+      <button role="tab" aria-selected="false" aria-controls="seccion-planes" id="tab-planes" data-seccion="planes">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-capas"/></svg>Planes
+      </button>
+    </nav>
+
+    <!-- ----------------------------- Empresas ----------------------------- -->
+    <section id="seccion-empresas" role="tabpanel" aria-labelledby="tab-empresas">
+      <div class="kpis" id="kpis" aria-live="polite"></div>
+
+      <div class="filtros">
+        <label class="buscar">
+          <span class="sr">Buscar empresa</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-buscar"/></svg>
+          <input id="buscar" type="search" placeholder="Nombre, NIT o correo" autocomplete="off">
+        </label>
+        <label class="campo campo--en-linea">
+          <span class="sr">Estado</span>
+          <select id="filtro-estado">
+            <option value="">Todos los estados</option>
+            <option value="ACTIVA">Activas</option>
+            <option value="SUSPENDIDA">Suspendidas</option>
+          </select>
+        </label>
+        <label class="campo campo--en-linea">
+          <span class="sr">Plan</span>
+          <select id="filtro-plan"><option value="">Todos los planes</option></select>
+        </label>
+      </div>
+
+      <div class="tabla-envoltura">
+        <table class="tabla">
+          <thead>
+            <tr><th scope="col">Empresa</th><th scope="col">Plan</th><th scope="col">Uso</th><th scope="col">Apps</th><th scope="col">Estado</th></tr>
+          </thead>
+          <tbody id="lista-empresas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ----------------------------- Planes ----------------------------- -->
+    <section id="seccion-planes" role="tabpanel" aria-labelledby="tab-planes" hidden>
+      <div class="cabecera">
+        <div>
+          <h2>Planes</h2>
+          <p class="suave">Vacío = sin límite. Las personas incluyen gerentes y a quienes solo marcan asistencia.</p>
+        </div>
+        <button class="btn btn--primario" id="btn-nuevo-plan" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><use href="#i-mas"/></svg>Nuevo plan
+        </button>
+      </div>
+      <div class="planes" id="lista-planes"></div>
+    </section>
+  </div>
+
+  <!-- ============================ DIÁLOGOS ============================ -->
+  <dialog class="dialogo dialogo--ancho" id="dlg-empresa" aria-labelledby="dlg-empresa-titulo">
+    <form method="dialog" id="form-empresa" novalidate>
+      <header class="dialogo__cabecera">
+        <div>
+          <p class="etiqueta" id="dlg-empresa-contacto"></p>
+          <h2 id="dlg-empresa-titulo">Empresa</h2>
+        </div>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <div class="uso" id="dlg-empresa-uso"></div>
+        <div class="dos-columnas">
+          <label class="campo"><span>Plan</span><select name="plan_id" required></select></label>
+          <label class="campo">
+            <span>Vence <em>(vacío = no vence)</em></span>
+            <input name="plan_vence" type="date">
+          </label>
+        </div>
+        <fieldset class="rostro">
+          <legend>Apps habilitadas</legend>
+          <label class="check"><input type="checkbox" name="app_INVENTARIO"><span><strong>Inventario POS</strong> · ventas, stock y caja</span></label>
+          <label class="check"><input type="checkbox" name="app_ASISTENCIA"><span><strong>Control de Personal</strong> · asistencia con reconocimiento facial</span></label>
+        </fieldset>
+        <label class="check check--peligro">
+          <input type="checkbox" name="suspendida">
+          <span><strong>Suspender empresa</strong> · nadie de ella puede entrar a las apps</span>
+        </label>
+        <label class="campo campo--separado">
+          <span>Notas internas <em>(solo las ves tú)</em></span>
+          <textarea name="notas" rows="3" maxlength="500"></textarea>
+        </label>
+        <p class="error" id="empresa-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog class="dialogo" id="dlg-plan" aria-labelledby="dlg-plan-titulo">
+    <form method="dialog" id="form-plan" novalidate>
+      <header class="dialogo__cabecera">
+        <h2 id="dlg-plan-titulo">Nuevo plan</h2>
+        <button class="btn-icono" value="cancelar" formnovalidate aria-label="Cerrar"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="dialogo__cuerpo">
+        <div class="dos-columnas">
+          <label class="campo"><span>Código</span><input name="codigo" required maxlength="20" autocapitalize="characters" placeholder="PYME"><small class="ayuda">No se puede cambiar después</small></label>
+          <label class="campo"><span>Nombre</span><input name="nombre" required maxlength="60" placeholder="Pyme"></label>
+        </div>
+        <label class="campo"><span>Descripción</span><input name="descripcion" maxlength="255" placeholder="Para negocios con varias sedes"></label>
+        <div class="tres-columnas">
+          <label class="campo"><span>Sedes</span><input name="max_sedes" type="number" min="1" inputmode="numeric" placeholder="Sin límite"></label>
+          <label class="campo"><span>Personas</span><input name="max_personas" type="number" min="1" inputmode="numeric" placeholder="Sin límite"></label>
+          <label class="campo"><span>Productos</span><input name="max_productos" type="number" min="1" inputmode="numeric" placeholder="Sin límite"></label>
+        </div>
+        <div class="dos-columnas">
+          <label class="campo"><span>Orden en la lista</span><input name="orden" type="number" min="0" value="10" inputmode="numeric"></label>
+          <label class="check check--centrado" id="fila-plan-activo" hidden><input type="checkbox" name="activo" checked><span>Plan disponible</span></label>
+        </div>
+        <p class="error" id="plan-error" role="alert" hidden></p>
+      </div>
+      <footer class="dialogo__pie">
+        <span class="espacio"></span>
+        <button class="btn btn--fantasma" value="cancelar" formnovalidate>Cancelar</button>
+        <button class="btn btn--primario" type="submit">Guardar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="avisos" id="avisos" aria-live="polite"></div>
+
+  <svg class="sprite" width="0" height="0" aria-hidden="true">
+    <defs>
+      <symbol id="i-plataforma" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-edificio" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18ZM6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M10 6h4M10 10h4M10 14h4M10 18h4"/></symbol>
+      <symbol id="i-capas" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7l10-5ZM2 17l10 5 10-5M2 12l10 5 10-5"/></symbol>
+      <symbol id="i-salir" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-tema" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+      <symbol id="i-buscar" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+      <symbol id="i-mas" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+      <symbol id="i-alerta" viewBox="0 0 24 24"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3ZM12 9v4M12 17h.01"/></symbol>
+      <symbol id="i-personas" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+      <symbol id="i-nuevo" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></symbol>
+      <symbol id="i-pausa" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M10 9v6M14 9v6"/></symbol>
+    </defs>
+  </svg>
+
+  <script src="plataforma.js" defer></script>
+</body>
+</html>

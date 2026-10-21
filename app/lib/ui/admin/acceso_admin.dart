@@ -6,6 +6,8 @@ import '../../core/tema.dart';
 import '../../data/api.dart';
 import '../../servicios/estado_app.dart';
 import '../comun/widgets.dart';
+import '../cuenta/recuperar_clave_page.dart';
+import '../cuenta/sin_acceso.dart';
 import 'admin_shell.dart';
 import 'operador_page.dart';
 
@@ -47,6 +49,7 @@ class _HojaAccesoAdminState extends State<HojaAccesoAdmin> {
   bool _ocultar = true;
   bool _cargando = false;
   String? _error;
+  ApiError? _sinAcceso;
 
   @override
   void dispose() {
@@ -62,18 +65,45 @@ class _HojaAccesoAdminState extends State<HojaAccesoAdmin> {
       _error = null;
     });
     try {
-      await context.read<EstadoApp>().sesion.iniciar(_email.text, _clave.text);
+      await context.read<EstadoApp>().sesion.iniciar(_email.text.trim().toLowerCase(), _clave.text);
       TextInput.finishAutofillContext();
       if (mounted) Navigator.of(context).pop(true);
     } on ApiError catch (e) {
-      setState(() => _error = e.mensaje);
+      setState(() {
+        if (e.sinAccesoApp) {
+          _sinAcceso = e;
+        } else {
+          _error = e.mensaje;
+        }
+      });
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
   }
 
+  Future<void> _recuperar() async {
+    final api = context.read<EstadoApp>().api;
+    if (api == null) return;
+    final email = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => RecuperarClavePage(api: api, email: _email.text.trim())),
+    );
+    if (email != null && mounted) setState(() => _email.text = email);
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_sinAcceso != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(Espacio.lg, 0, Espacio.lg, Espacio.lg),
+        child: PanelSinAcceso(
+          error: _sinAcceso!,
+          alUsarOtraCuenta: () => setState(() {
+            _sinAcceso = null;
+            _clave.clear();
+          }),
+        ),
+      );
+    }
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SingleChildScrollView(
@@ -90,8 +120,8 @@ class _HojaAccesoAdminState extends State<HojaAccesoAdmin> {
                 Text('Ingresar', style: context.textos.headlineMedium),
                 const SizedBox(height: Espacio.xxs),
                 Text(
-                  'Cuenta General: estado y sincronización del kiosco. '
-                  'Cuenta Administrativa: personal, horarios, cumplimiento y reportes.',
+                  'Operador: estado y sincronización del kiosco. '
+                  'Administrador o gerente: personal, horarios, cumplimiento y reportes.',
                   style: context.textos.bodyMedium?.copyWith(color: context.sem.textoSuave),
                 ),
                 const SizedBox(height: Espacio.lg),
@@ -102,10 +132,10 @@ class _HojaAccesoAdminState extends State<HojaAccesoAdmin> {
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
                   decoration: const InputDecoration(
-                    labelText: 'Usuario o correo',
-                    prefixIcon: Icon(Icons.person_outline_rounded),
+                    labelText: 'Correo',
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
                   ),
-                  validator: (v) => (v == null || v.trim().length < 3) ? 'Escribe tu usuario' : null,
+                  validator: (v) => (v == null || v.trim().length < 3) ? 'Escribe tu correo' : null,
                 ),
                 const SizedBox(height: Espacio.md),
                 TextFormField(
@@ -124,6 +154,13 @@ class _HojaAccesoAdminState extends State<HojaAccesoAdmin> {
                     ),
                   ),
                   validator: (v) => (v == null || v.isEmpty) ? 'Escribe tu contraseña' : null,
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _cargando ? null : _recuperar,
+                    child: const Text('¿Olvidaste tu contraseña?'),
+                  ),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: Espacio.md),

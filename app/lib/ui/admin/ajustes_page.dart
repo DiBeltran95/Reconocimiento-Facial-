@@ -3,13 +3,17 @@ import 'package:provider/provider.dart';
 
 import '../../core/tema.dart';
 import '../../servicios/ajustes.dart';
+import '../../servicios/estado_app.dart';
 import '../comun/widgets.dart';
+import '../cuenta/mi_empresa_page.dart';
 import 'componentes_kiosco.dart';
 import 'contexto_admin.dart';
 import 'kioscos_page.dart';
+import 'sedes_page.dart';
 import 'usuarios_page.dart';
 
-/// Pestaña "Ajustes" del administrativo: kiosco, reconocimiento, cuentas y kioscos.
+/// Pestaña "Ajustes" del administrativo: empresa, sedes, equipo, kioscos y
+/// los ajustes de este kiosco.
 class AjustesPage extends StatelessWidget {
   const AjustesPage({super.key});
 
@@ -18,6 +22,9 @@ class AjustesPage extends StatelessWidget {
     void abrir(Widget pagina) => Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => ChangeNotifierProvider.value(value: context.read<ContextoAdmin>(), child: pagina),
         ));
+    // Sedes y equipo los gestiona solo el administrador de la empresa; el
+    // gerente ve su empresa y los kioscos de sus sedes.
+    final esAdmin = context.read<EstadoApp>().sesion.sesion?.esAdminEmpresa ?? false;
     return FondoTecnico(
       intensidad: 0.6,
       child: ListView(
@@ -27,16 +34,32 @@ class AjustesPage extends StatelessWidget {
             titulo: 'Administración',
             hijos: [
               _Enlace(
-                icono: Icons.manage_accounts_outlined,
-                titulo: 'Usuarios',
-                detalle: 'Cuentas General (kioscos) y Administrativas',
-                alTocar: () => abrir(const UsuariosPage()),
+                icono: Icons.business_outlined,
+                titulo: 'Mi empresa',
+                detalle: 'Plan, uso, apps habilitadas y datos',
+                alTocar: () => abrir(const MiEmpresaPage()),
               ),
+              if (esAdmin) ...[
+                const Divider(),
+                _Enlace(
+                  icono: Icons.place_outlined,
+                  titulo: 'Sedes',
+                  detalle: 'Las mismas de Ventario',
+                  alTocar: () => abrir(const SedesPage()),
+                ),
+                const Divider(),
+                _Enlace(
+                  icono: Icons.manage_accounts_outlined,
+                  titulo: 'Equipo',
+                  detalle: 'Cuentas y su acceso a cada app',
+                  alTocar: () => abrir(const UsuariosPage()),
+                ),
+              ],
               const Divider(),
               _Enlace(
                 icono: Icons.devices_other_rounded,
                 titulo: 'Kioscos vinculados',
-                detalle: 'Teléfonos y tablets de todas las sedes',
+                detalle: esAdmin ? 'Teléfonos y tablets de todas las sedes' : 'Teléfonos y tablets de tus sedes',
                 alTocar: () => abrir(const KioscosPage()),
               ),
             ],

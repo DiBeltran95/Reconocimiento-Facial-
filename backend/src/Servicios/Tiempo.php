@@ -9,25 +9,30 @@ use App\Http\HttpError;
 use DateTimeImmutable;
 use DateTimeZone;
 
-/** La BD guarda UTC; aquí se traduce a/desde la zona horaria del negocio. */
+/**
+ * La BD guarda UTC; aquí se traduce a/desde la zona horaria de la EMPRESA.
+ *
+ * Cada empresa tiene la suya (`empresas.zona_horaria`). La fija `Auth` al
+ * identificar a la persona o al kiosco; antes de eso (rutas públicas) se usa
+ * la zona por defecto de la configuración.
+ */
 final class Tiempo
 {
     private static ?DateTimeZone $zona = null;
 
+    public static function usarZona(string $nombre): void
+    {
+        try {
+            self::$zona = new DateTimeZone($nombre !== '' ? $nombre : 'America/Bogota');
+        } catch (\Throwable) {
+            self::$zona = new DateTimeZone('America/Bogota');
+        }
+    }
+
     public static function zona(): DateTimeZone
     {
         if (self::$zona === null) {
-            $nombre = null;
-            try {
-                // Reutiliza la configuración del sistema de inventarios (solo lectura).
-                $nombre = Db::valor("SELECT valor FROM configuracion WHERE clave = 'zona_horaria'");
-            } catch (\Throwable) {
-            }
-            try {
-                self::$zona = new DateTimeZone($nombre ?: (string) Config::get('zona_por_defecto', 'America/Bogota'));
-            } catch (\Throwable) {
-                self::$zona = new DateTimeZone('America/Bogota');
-            }
+            self::usarZona((string) Config::get('zona_por_defecto', 'America/Bogota'));
         }
         return self::$zona;
     }

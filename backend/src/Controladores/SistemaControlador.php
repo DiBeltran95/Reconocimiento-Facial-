@@ -11,6 +11,7 @@ use App\Db;
 use App\Http\HttpError;
 use App\Http\Request;
 use App\Http\Response;
+use App\Servicios\Plan;
 use App\Servicios\Tiempo;
 
 final class SistemaControlador
@@ -22,35 +23,59 @@ final class SistemaControlador
             'ok'            => true,
             'hora_servidor' => Tiempo::ahoraUtcIso(),
             'zona'          => Tiempo::zona()->getName(),
-            'negocio'       => self::nombreNegocio(),
+            'plataforma'    => (string) Config::get('nombre_plataforma', ''),
         ]);
     }
 
-    /** Acepta `usuario` (cuentas de asistencia) o `email` (administradores de inventario). */
+    /**
+     * Correo y contraseña de la cuenta de la plataforma (la misma de Inventario).
+     * Acepta `email` o `usuario` (apps anteriores); las cuentas migradas desde
+     * `asis_usuarios` guardan su nombre de usuario en la columna del correo.
+     */
     public static function login(Request $req): never
     {
         $datos = $req->json();
-        $usuario = mb_strtolower(trim((string) ($datos['usuario'] ?? $datos['email'] ?? '')));
+        $email = mb_strtolower(trim((string) ($datos['email'] ?? $datos['usuario'] ?? '')));
         $password = (string) ($datos['password'] ?? '');
-        if ($usuario === '' || $password === '') {
-            throw HttpError::validacion('Escribe tu usuario y contraseña');
+        if ($email === '' || $password === '') {
+            throw HttpError::validacion('Escribe tu correo y contraseña');
         }
 
-        $clave = $req->ip() . '|' . $usuario;
+        $clave = $req->ip() . '|' . $email;
         LimiteIntentos::verificar($clave);
 
-        $persona = Auth::autenticar($usuario, $password);
+        $persona = Auth::autenticar($email, $password);
         if ($persona === null) {
             LimiteIntentos::fallo($clave);
             usleep(random_int(200_000, 400_000)); // iguala tiempos y frena la fuerza bruta
-            throw new HttpError(401, 'Usuario o contraseña incorrectos');
+            throw new HttpError(401, 'Correo o contraseña incorrectos');
         }
         LimiteIntentos::limpiar($clave);
 
         $ttl = (int) Config::get('jwt_ttl', 43200);
+        if (!empty($persona['superadmin'])) {
+            // Solo para el panel de plataforma: las rutas de empresa lo rechazan.
+            $token = Jwt::firmar(
+                ['sub' => $persona['id'], 'sa' => 1, 'iat' => time(), 'exp' => time() + $ttl],
+                (string) Config::get('jwt_secret'),
+            );
+            Response::json(['token' => $token, 'expira_en' => $ttl, 'superadmin' => true]);
+        }
+
+        // Desde un kiosco ya vinculado (envía su token), solo entra alguien de
+        // SU empresa: el panel del kiosco no puede abrirse con otra cuenta.
+        if ($req->header('X-Dispositivo') !== null) {
+            $disp = Auth::dispositivo($req);
+            if ($disp['empresa_id'] !== $persona['empresa_id']) {
+                throw new HttpError(403, 'Este kiosco pertenece a otra empresa. Entra con una cuenta de esa empresa.', [
+                    'codigo' => 'OTRA_EMPRESA',
+                ]);
+            }
+        }
+
         $token = Jwt::firmar([
             'sub' => $persona['id'],
-            'org' => $persona['origen'],
+            'emp' => $persona['empresa_id'],
             'rol' => $persona['rol'],
             'iat' => time(),
             'exp' => time() + $ttl,
@@ -59,8 +84,9 @@ final class SistemaControlador
         Response::json([
             'token'     => $token,
             'expira_en' => $ttl,
-            'usuario'   => ['id' => $persona['id'], 'nombre' => $persona['nombre'], 'rol' => $persona['rol']],
-            'negocio'   => self::nombreNegocio(),
+            'usuario'   => self::usuarioJson($persona),
+            'empresa'   => self::empresaJson($persona['empresa_id']),
+            'negocio'   => self::nombreNegocio($persona['empresa_id']),
         ]);
     }
 
@@ -68,42 +94,60 @@ final class SistemaControlador
     {
         $persona = Auth::persona($req);
         Response::json([
-            'usuario' => ['id' => $persona['id'], 'nombre' => $persona['nombre'], 'rol' => $persona['rol']],
-            'negocio' => self::nombreNegocio(),
+            'usuario' => self::usuarioJson($persona),
+            'empresa' => self::empresaJson($persona['empresa_id']),
+            'negocio' => self::nombreNegocio($persona['empresa_id']),
+            'plan'    => Plan::deEmpresa($persona['empresa_id']),
         ]);
     }
 
-    /** Sedes visibles para la persona (tabla existente `sedes`, solo lectura). */
+    /** Sedes visibles para la persona (todas las de su empresa, o las del gerente). */
     public static function sedes(Request $req): never
     {
-        $admin = Auth::persona($req);
-        $sql = 'SELECT id, nombre, codigo, direccion, es_principal
-                  FROM sedes WHERE activo = 1 AND deleted_at IS NULL';
-        $params = [];
-        if ($admin['sedes'] !== null) {
-            if ($admin['sedes'] === []) {
-                Response::json(['sedes' => []]);
-            }
-            $sql .= ' AND id IN (' . Db::enLista($admin['sedes']) . ')';
-            $params = $admin['sedes'];
+        $persona = Auth::persona($req);
+        if ($persona['sedes'] === []) {
+            Response::json(['sedes' => []]);
         }
-        $sedes = array_map(static fn (array $s) => [
-            'id'           => (int) $s['id'],
-            'nombre'       => $s['nombre'],
-            'codigo'       => $s['codigo'],
-            'direccion'    => $s['direccion'],
-            'es_principal' => (bool) $s['es_principal'],
-        ], Db::filas($sql . ' ORDER BY es_principal DESC, nombre', $params));
-
+        $filas = Db::filas(
+            'SELECT id, uuid, nombre, codigo, direccion, telefono, es_principal, activo
+               FROM sedes
+              WHERE empresa_id = ? AND deleted_at IS NULL AND id IN (' . Db::enLista($persona['sedes']) . ')
+              ORDER BY es_principal DESC, nombre',
+            [$persona['empresa_id'], ...$persona['sedes']],
+        );
+        // Los kioscos y los formularios solo ofrecen las activas; el panel de
+        // sedes del administrador pide también las inactivas (?todas=1).
+        $todas = $req->query('todas') === '1' && $persona['rol_asistencia'] === Auth::ROL_ADMIN;
+        $sedes = [];
+        foreach ($filas as $s) {
+            if (!$todas && (int) $s['activo'] !== 1) {
+                continue;
+            }
+            $sedes[] = SedesControlador::aJson($s);
+        }
         Response::json(['sedes' => $sedes]);
     }
 
-    public static function nombreNegocio(): string
+    public static function usuarioJson(array $persona): array
     {
-        try {
-            return (string) (Db::valor("SELECT valor FROM configuracion WHERE clave = 'nombre_negocio'") ?? '');
-        } catch (\Throwable) {
-            return '';
-        }
+        return [
+            'id'             => $persona['id'],
+            'nombre'         => $persona['nombre'],
+            'email'          => $persona['email'],
+            'rol'            => $persona['rol'],
+            'rol_asistencia' => $persona['rol_asistencia'],
+            'rol_inventario' => $persona['rol_inventario'],
+        ];
+    }
+
+    public static function empresaJson(int $empresaId): ?array
+    {
+        $e = Db::fila('SELECT uuid, nombre FROM empresas WHERE id = ?', [$empresaId]);
+        return $e === null ? null : ['uuid' => $e['uuid'], 'nombre' => $e['nombre']];
+    }
+
+    public static function nombreNegocio(int $empresaId): string
+    {
+        return (string) (Db::valor('SELECT nombre FROM empresas WHERE id = ?', [$empresaId]) ?? '');
     }
 }

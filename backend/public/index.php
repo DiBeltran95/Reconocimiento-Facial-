@@ -6,11 +6,14 @@ declare(strict_types=1);
  * Front controller: todas las rutas /api/* pasan por aquí.
  */
 
+use App\Controladores\CuentaControlador as Cuenta;
 use App\Controladores\DispositivosControlador as Dispositivos;
 use App\Controladores\EmpleadosControlador as Empleados;
 use App\Controladores\HorariosControlador as Horarios;
 use App\Controladores\KioscoControlador as Kiosco;
+use App\Controladores\PlataformaControlador as Plataforma;
 use App\Controladores\ReportesControlador as Reportes;
+use App\Controladores\SedesControlador as Sedes;
 use App\Controladores\SistemaControlador as Sistema;
 use App\Controladores\UsuariosControlador as Usuarios;
 use App\Http\Request;
@@ -23,11 +26,29 @@ $r = new Router();
 // Público
 $r->get('/api/salud', [Sistema::class, 'salud']);
 $r->post('/api/auth/login', [Sistema::class, 'login']);
+$r->post('/api/cuenta/registro', [Cuenta::class, 'registro']);
+$r->post('/api/cuenta/recuperar', [Cuenta::class, 'recuperar']);
+$r->post('/api/cuenta/restablecer', [Cuenta::class, 'restablecer']);
 
 // Cualquier persona autenticada (GENERAL o ADMINISTRATIVO)
 $r->get('/api/auth/yo', [Sistema::class, 'yo']);
 $r->get('/api/sedes', [Sistema::class, 'sedes']);
 $r->post('/api/dispositivos', [Dispositivos::class, 'crear']);
+$r->get('/api/cuenta/empresa', [Cuenta::class, 'empresa']);
+$r->delete('/api/cuenta', [Cuenta::class, 'eliminar']);
+
+// Solo el administrador de la empresa ----------------------------------------
+$r->put('/api/cuenta/empresa', [Cuenta::class, 'editarEmpresa']);
+$r->post('/api/sedes', [Sedes::class, 'crear']);
+$r->put('/api/sedes/{id}', [Sedes::class, 'actualizar']);
+
+// Superadministrador de la plataforma ----------------------------------------
+$r->get('/api/plataforma/resumen', [Plataforma::class, 'resumen']);
+$r->get('/api/plataforma/empresas', [Plataforma::class, 'empresas']);
+$r->put('/api/plataforma/empresas/{id}', [Plataforma::class, 'actualizarEmpresa']);
+$r->get('/api/plataforma/planes', [Plataforma::class, 'planes']);
+$r->post('/api/plataforma/planes', [Plataforma::class, 'crearPlan']);
+$r->put('/api/plataforma/planes/{id}', [Plataforma::class, 'actualizarPlan']);
 
 // Solo ADMINISTRATIVO -------------------------------------------------------
 $r->get('/api/dispositivos', [Dispositivos::class, 'listar']);

@@ -6,6 +6,7 @@ import '../../data/api.dart';
 import '../../data/modelos.dart';
 import '../../servicios/estado_app.dart';
 import '../comun/widgets.dart';
+import '../cuenta/plan_ui.dart';
 import '../horarios/plan_empleado.dart';
 import 'acceso_admin.dart';
 import 'contexto_admin.dart';
@@ -31,7 +32,7 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
 
   bool _guardando = false;
   bool _cambio = false;
-  bool _consentimiento = false;
+  late bool _consentimiento = widget.empleado?.tieneConsentimiento ?? false;
   String? _error;
   String? _campoError;
 
@@ -60,6 +61,7 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
           documento: _documento.text,
           nombre: _nombre.text,
           cargo: cargo,
+          consentimiento: _consentimiento,
         );
         _empleado = r.empleado;
         if (mounted) avisar(context, r.reactivado ? 'Empleado reactivado' : 'Empleado creado');
@@ -77,6 +79,9 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
       _actualizarKiosco();
       return true;
     } on ApiError catch (e) {
+      // El plan no admite a nadie más: se explica en su hoja, no como error.
+      if (!mounted) return false;
+      if (await manejarLimite(context, _ctx.api, e)) return false;
       setState(() {
         _error = e.mensaje;
         _campoError = e.campo;
@@ -277,6 +282,11 @@ class _TarjetaRostro extends StatelessWidget {
   final ValueChanged<bool> alConsentir;
   final VoidCallback? alRegistrar;
 
+  static String _fecha(DateTime f) {
+    final l = f.toLocal();
+    return '${l.day}/${l.month}/${l.year}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final sem = context.sem;
@@ -341,17 +351,53 @@ class _TarjetaRostro extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: Espacio.sm),
-            CheckboxListTile(
-              value: consentimiento,
-              onChanged: (v) => alConsentir(v ?? false),
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: Text(
-                'El empleado autorizó el tratamiento de sus datos biométricos (Ley 1581 de 2012).',
-                style: context.textos.bodyMedium,
+            if (empleado?.cuentaEmail != null) ...[
+              const SizedBox(height: Espacio.sm),
+              Row(
+                children: [
+                  Icon(Icons.link_rounded, size: 18, color: context.colores.primary),
+                  const SizedBox(width: Espacio.xs),
+                  Expanded(
+                    child: Text(
+                      empleado!.cuentaActiva
+                          ? 'Tiene cuenta (${empleado!.cuentaEmail}): también entra a las apps.'
+                          : 'Su cuenta (${empleado!.cuentaEmail}) está inactiva: no puede marcar.',
+                      style: context.textos.bodySmall?.copyWith(color: empleado!.cuentaActiva ? null : sem.peligro),
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ],
+            const SizedBox(height: Espacio.sm),
+            if (empleado?.consentimientoEn != null)
+              // Ya quedó registrada (quién y cuándo, en el servidor): no se vuelve a pedir.
+              Row(
+                children: [
+                  Icon(Icons.verified_outlined, size: 18, color: sem.entrada),
+                  const SizedBox(width: Espacio.xs),
+                  Expanded(
+                    child: Text(
+                      'Autorización de datos biométricos registrada el ${_fecha(empleado!.consentimientoEn!)}.',
+                      style: context.textos.bodySmall,
+                    ),
+                  ),
+                ],
+              )
+            else
+              CheckboxListTile(
+                value: consentimiento,
+                onChanged: (v) => alConsentir(v ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(
+                  'El empleado autorizó el tratamiento de sus datos biométricos (Ley 1581 de 2012).',
+                  style: context.textos.bodyMedium,
+                ),
+                subtitle: Text(
+                  'Queda registrado quién lo confirmó y cuándo.',
+                  style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
+                ),
+              ),
             const SizedBox(height: Espacio.xs),
             FilledButton.tonalIcon(
               onPressed: alRegistrar,

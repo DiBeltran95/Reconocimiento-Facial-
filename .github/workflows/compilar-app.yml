@@ -1,4 +1,4 @@
-name: Compilar app (iPhone .ipa + Android .apk)
+name: Compilar Presente (iPhone .ipa)
 
 # Se ejecuta con cada cambio de la app en `main` y también a mano desde
 # Actions → "Compilar app" → Run workflow.
@@ -15,6 +15,10 @@ on:
         description: 'URL directa de mobilefacenet.tflite (opcional: también sirve el secreto MODELO_TFLITE_URL o el archivo en el repo)'
         required: false
         default: ''
+      construir_android:
+        description: 'Compilar también el APK de Android (no se genera por defecto)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -82,7 +86,7 @@ jobs:
           flutter build ios --release --no-codesign --build-number ${{ github.run_number }}
           mkdir -p ../salida/Payload
           cp -R build/ios/iphoneos/Runner.app ../salida/Payload/
-          (cd ../salida && zip -qry ControlPersonal-iOS-sin-firmar.ipa Payload && rm -rf Payload)
+          (cd ../salida && zip -qry Presente-iOS-sin-firmar.ipa Payload && rm -rf Payload)
 
       # Con cuenta de desarrollador: .ipa firmado (ad hoc / desarrollo / empresa).
       - name: Instalar certificado y perfil de aprovisionamiento
@@ -99,11 +103,11 @@ jobs:
           flutter build ipa --release --build-number ${{ github.run_number }} \
             --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
           mkdir -p ../salida
-          cp build/ios/ipa/*.ipa ../salida/ControlPersonal-iOS.ipa
+          cp build/ios/ipa/*.ipa ../salida/Presente-iOS.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ControlPersonal-iOS
+          name: Presente-iOS
           path: salida/*.ipa
           if-no-files-found: error
           retention-days: 30
@@ -112,9 +116,11 @@ jobs:
         if: always() && steps.firma.outputs.modo == 'firmado'
         run: security delete-keychain "$RUNNER_TEMP/firma.keychain-db" || true
 
+  # Android se publica por Play Store (.aab firmado en local): aquí solo a petición.
   android:
-    name: Android (.apk)
+    name: Android (.apk, a petición)
     needs: verificar
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.construir_android }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     defaults:
@@ -139,10 +145,10 @@ jobs:
       - run: flutter build apk --release --build-number ${{ github.run_number }}
       - run: |
           mkdir -p ../salida
-          cp build/app/outputs/flutter-apk/app-release.apk ../salida/ControlPersonal-Android.apk
+          cp build/app/outputs/flutter-apk/app-release.apk ../salida/Presente-Android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: ControlPersonal-Android
+          name: Presente-Android
           path: salida/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -173,5 +179,5 @@ jobs:
             --title "Última compilación · #${{ github.run_number }}" \
             --notes "Compilado automáticamente desde ${GITHUB_SHA::7}.
 
-          **Android:** descarga \`ControlPersonal-Android.apk\` en el teléfono e instálalo.
-          **iPhone:** \`ControlPersonal-iOS-sin-firmar.ipa\` se instala con Sideloadly o AltStore (ver README). Si configuraste tu certificado de Apple, \`ControlPersonal-iOS.ipa\` ya viene firmado."
+          **Android:** descarga \`Presente-Android.apk\` en el teléfono e instálalo.
+          **iPhone:** \`Presente-iOS-sin-firmar.ipa\` se instala con Sideloadly o AltStore (ver README). Si configuraste tu certificado de Apple, \`Presente-iOS.ipa\` ya viene firmado."

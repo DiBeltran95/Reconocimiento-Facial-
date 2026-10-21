@@ -258,7 +258,12 @@ $('#form-login').addEventListener('submit', async (ev) => {
   boton.disabled = true;
   mostrarError('#login-error');
   try {
-    const r = await api('/auth/login', { metodo: 'POST', cuerpo: { usuario: f.usuario.value, password: f.password.value } });
+    const r = await api('/auth/login', { metodo: 'POST', cuerpo: { email: f.usuario.value, password: f.password.value } });
+    if (r.superadmin) {
+      // El equipo de la plataforma tiene su propio panel.
+      location.href = '../plataforma/';
+      return;
+    }
     guardarSesion(r.token);
     f.password.value = '';
     await entrarApp(r.usuario);
@@ -271,7 +276,7 @@ $('#form-login').addEventListener('submit', async (ev) => {
 
 async function entrarApp(usuario) {
   if (usuario.rol !== 'ADMINISTRATIVO') {
-    cerrarSesion('Tu cuenta es General: solo opera kioscos desde la app. El panel requiere una cuenta Administrativa.');
+    cerrarSesion('Tu cuenta es de operador de kioscos: úsala desde la app. El panel es para administradores y gerentes.');
     return;
   }
   estado.usuario = usuario;
@@ -686,6 +691,9 @@ cancelable($('#form-empleado'), $('#dlg-empleado'), async (ev) => {
     if (archivos.length) {
       const fd = new FormData();
       archivos.forEach((a) => fd.append('fotos[]', a));
+      // La casilla de autorización ya se exigió arriba: el servidor la registra
+      // (quién y cuándo) antes de guardar datos biométricos.
+      fd.append('consentimiento', '1');
       await api(`/empleados/${r.empleado.id}/fotos`, { metodo: 'POST', formulario: fd });
     }
     $('#dlg-empleado').close();
@@ -903,7 +911,7 @@ async function cargarUsuarios() {
         el('p', { class: 'suave' }, `@${u.usuario}${u.activo ? '' : ' · inactivo'}`)),
       u.rol === 'ADMINISTRATIVO' ? pildora('Administrativo', '--primario', 'i-escudo') : pildora('General', '--salida', 'i-movil'),
       el('button', { class: 'btn btn--fantasma', type: 'button', onclick: () => abrirUsuario(u) }, 'Editar'),
-    )) : [el('div', { class: 'vacio' }, el('strong', {}, 'Aún no hay cuentas propias'), 'Crea una cuenta General para operar los kioscos de las sedes.')]));
+    )) : [el('div', { class: 'vacio' }, el('strong', {}, 'Aún no hay más cuentas'), 'Crea una cuenta de operador para atender los kioscos de las sedes.')]));
   } catch (e) {
     if (e.status !== 401) avisar(e.message, true);
   }
@@ -930,7 +938,7 @@ cancelable($('#form-usuario'), $('#dlg-usuario'), async (ev) => {
   const f = ev.currentTarget;
   const u = estado.usuarioEditado;
   const cuerpo = { nombre: f.nombre.value, rol: $('input[name=rol]:checked', f).value };
-  if (!u) cuerpo.usuario = f.usuario.value;
+  if (!u) cuerpo.email = f.usuario.value;
   if (f.password.value) cuerpo.password = f.password.value;
   if (u) cuerpo.activo = f.activo.checked;
   if (!u && f.password.value.length < 8) return mostrarError('#usuario-error', 'La contraseña debe tener al menos 8 caracteres.');

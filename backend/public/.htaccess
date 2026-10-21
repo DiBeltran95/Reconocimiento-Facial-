@@ -15,8 +15,9 @@ CGIPassAuth On
     RewriteCond %{REQUEST_URI} /$
     RewriteRule ^$ %{REQUEST_URI}panel/ [R=302,L]
 
-    # /panel → /panel/
+    # /panel → /panel/  ·  /plataforma → /plataforma/
     RewriteRule ^panel$ %{REQUEST_URI}/ [R=301,L]
+    RewriteRule ^plataforma$ %{REQUEST_URI}/ [R=301,L]
 
     # Archivos reales (panel web) se sirven tal cual; el resto va a la API.
     RewriteCond %{REQUEST_FILENAME} -f [OR]

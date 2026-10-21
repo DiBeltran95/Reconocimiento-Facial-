@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'modelos.dart';
 
 class ApiError implements Exception {
-  const ApiError(this.status, this.mensaje, {this.campo, this.codigo});
+  const ApiError(this.status, this.mensaje, {this.campo, this.codigo, this.recurso});
 
   /// 0 = sin conexión / tiempo agotado.
   final int status;
@@ -16,9 +16,23 @@ class ApiError implements Exception {
   final String? campo;
   final String? codigo;
 
+  /// Con LIMITE_PLAN: qué recurso se llenó (sedes, personas, productos).
+  final String? recurso;
+
   bool get sinConexion => status == 0;
   bool get noAutorizado => status == 401;
   bool get dispositivoRevocado => codigo == 'DISPOSITIVO_REVOCADO';
+  bool get limitePlan => codigo == 'LIMITE_PLAN';
+
+  /// La persona existe y su contraseña es correcta, pero no puede usar esta
+  /// app: se explica en una pantalla propia, no como un error genérico.
+  bool get sinAccesoApp => const {
+        'CUENTA_DESACTIVADA',
+        'EMPRESA_INEXISTENTE',
+        'EMPRESA_SUSPENDIDA',
+        'APP_NO_HABILITADA',
+        'SIN_ACCESO_APP',
+      }.contains(codigo);
 
   @override
   String toString() => mensaje;
@@ -28,6 +42,11 @@ class ApiError implements Exception {
 /// dispositivo; el administrador, con el JWT de su sesión.
 class Api {
   Api({required String baseUrl, this.tokenDispositivo}) : baseUrl = normalizarUrl(baseUrl);
+
+  /// Servidor de la plataforma. Se fija al compilar
+  /// (`--dart-define=API_URL=https://…`); quien instala desde la tienda no
+  /// tiene que escribir ninguna dirección.
+  static const urlPorDefecto = String.fromEnvironment('API_URL', defaultValue: 'https://agendaservi.com');
 
   String baseUrl;
   String? tokenDispositivo;
@@ -87,6 +106,7 @@ class Api {
       (mapa['error'] as String?) ?? 'Error del servidor (${r.statusCode})',
       campo: mapa['campo'] as String?,
       codigo: mapa['codigo'] as String?,
+      recurso: mapa['recurso'] as String?,
     );
   }
 
@@ -121,15 +141,26 @@ class Api {
     );
   }
 
-  /// [usuario] es el nombre de usuario de la app o el correo de un
-  /// administrador del sistema de inventarios.
-  Future<SesionAdmin> login(String usuario, String password) async {
-    final j = await _post('/api/auth/login', {'usuario': usuario, 'password': password}) as Map<String, dynamic>;
+  /// Correo y contraseña de la cuenta de la plataforma: la misma con la que la
+  /// persona entra a Inventario. (Las cuentas migradas de la versión anterior
+  /// pueden seguir usando su nombre de usuario.)
+  Future<SesionAdmin> login(String email, String password) async {
+    final j = await _post('/api/auth/login', {'email': email, 'password': password}) as Map<String, dynamic>;
+    if (j['superadmin'] == true) {
+      throw const ApiError(403, 'Esta cuenta es del equipo de la plataforma: entra desde el panel web.');
+    }
+    return _sesionDesde(j);
+  }
+
+  SesionAdmin _sesionDesde(Map<String, dynamic> j) {
     final u = j['usuario'] as Map<String, dynamic>;
     final sesion = SesionAdmin(
       token: j['token'] as String,
       nombre: u['nombre'] as String,
-      rol: Rol.desdeApi(u['rol'] as String),
+      email: (u['email'] as String?) ?? '',
+      rol: Rol.desdeApi(u['rol'] as String?),
+      rolAsistencia: RolAsistencia.desdeApi(u['rol_asistencia'] as String?),
+      empresa: EmpresaRef.desdeJson(j['empresa'] as Map<String, dynamic>?),
       expira: DateTime.now().add(Duration(seconds: (j['expira_en'] as num).toInt() - 60)),
     );
     tokenAdmin = sesion.token;
@@ -137,12 +168,94 @@ class Api {
   }
 
   // -------------------------------------------------------------------------
+  // Cuenta de la empresa (mismo contrato que Inventario: docs/PLATAFORMA.md)
+  // -------------------------------------------------------------------------
+
+  /// Crea la empresa con su primera sede y deja la sesión iniciada.
+  Future<SesionAdmin> registrarEmpresa({
+    required String empresa,
+    String? nit,
+    String? telefono,
+    required String sede,
+    required String nombre,
+    required String email,
+    required String password,
+  }) async {
+    final j = await _post('/api/cuenta/registro', {
+      'empresa': {'nombre': empresa, 'nit': nit, 'telefono': telefono},
+      'sede': {'nombre': sede},
+      'usuario': {'nombre': nombre, 'email': email, 'password': password},
+      'acepta_terminos': true,
+    }) as Map<String, dynamic>;
+    return _sesionDesde(j);
+  }
+
+  /// Envía un código de 6 números al correo (si existe; la respuesta es la misma).
+  Future<int> recuperarClave(String email) async {
+    final j = await _post('/api/cuenta/recuperar', {'email': email}) as Map<String, dynamic>;
+    return ((j['vigencia_minutos'] as num?) ?? 15).toInt();
+  }
+
+  Future<void> restablecerClave({required String email, required String codigo, required String password}) =>
+      _post('/api/cuenta/restablecer', {'email': email, 'codigo': codigo, 'password': password});
+
+  Future<EmpresaInfo> empresa() async =>
+      EmpresaInfo.desdeJson(await _get('/api/cuenta/empresa', admin: true) as Map<String, dynamic>);
+
+  Future<EmpresaInfo> editarEmpresa({String? nombre, String? nit, String? telefono}) async =>
+      EmpresaInfo.desdeJson(await _put('/api/cuenta/empresa', {
+        'nombre': ?nombre,
+        'nit': ?nit,
+        'telefono': ?telefono,
+      }, admin: true) as Map<String, dynamic>);
+
+  /// El administrador elimina la empresa ([confirmacion] = su nombre); los
+  /// demás, solo su cuenta.
+  Future<void> eliminarCuenta({required String password, String? confirmacion}) async {
+    final r = await _enviar(() => _http.delete(
+          uri('/api/cuenta'),
+          headers: cabeceras(admin: true),
+          body: jsonEncode({'password': password, 'confirmacion': ?confirmacion}),
+        ));
+    _procesar(r);
+  }
+
+  /// Plan y uso actuales (para avisar del límite antes de abrir un formulario).
+  Future<PlanEmpresa?> plan() async {
+    final j = await _get('/api/auth/yo', admin: true) as Map<String, dynamic>;
+    return PlanEmpresa.desdeJson(j['plan'] as Map<String, dynamic>?);
+  }
+
+  // -------------------------------------------------------------------------
   // Administración
   // -------------------------------------------------------------------------
 
-  Future<List<Sede>> sedes() async {
-    final j = await _get('/api/sedes', admin: true) as Map<String, dynamic>;
+  /// Sedes visibles. [todas] incluye las inactivas (solo para el administrador).
+  Future<List<Sede>> sedes({bool todas = false}) async {
+    final j = await _get('/api/sedes', query: {if (todas) 'todas': '1'}, admin: true) as Map<String, dynamic>;
     return (j['sedes'] as List).map((s) => Sede.desdeJson(s as Map<String, dynamic>)).toList();
+  }
+
+  /// Crea o edita una sede (las mismas de Inventario). El cupo lo exige el servidor.
+  Future<Sede> guardarSede({
+    int? id,
+    required String nombre,
+    String? codigo,
+    String? direccion,
+    String? telefono,
+    bool? activo,
+  }) async {
+    final cuerpo = {
+      'nombre': nombre,
+      if (codigo != null && codigo.isNotEmpty) 'codigo': codigo,
+      'direccion': direccion,
+      'telefono': telefono,
+      'activo': ?activo,
+    };
+    final j = (id == null
+        ? await _post('/api/sedes', cuerpo, admin: true)
+        : await _put('/api/sedes/$id', cuerpo, admin: true)) as Map<String, dynamic>;
+    return Sede.desdeJson(j['sede'] as Map<String, dynamic>);
   }
 
   Future<DispositivoRegistrado> registrarDispositivo(int sedeId, String nombre) async {
@@ -167,15 +280,24 @@ class Api {
     return Empleado.desdeJson(j['empleado'] as Map<String, dynamic>);
   }
 
+  /// [consentimiento]: la persona autorizó el tratamiento de sus datos
+  /// biométricos (Ley 1581). El servidor guarda quién y cuándo lo registró.
   Future<({Empleado empleado, bool reactivado})> crearEmpleado({
     required int sedeId,
     required String documento,
     required String nombre,
     String? cargo,
+    bool consentimiento = false,
   }) async {
     final j = await _post(
       '/api/empleados',
-      {'sede_id': sedeId, 'documento': documento, 'nombre': nombre, 'cargo': cargo},
+      {
+        'sede_id': sedeId,
+        'documento': documento,
+        'nombre': nombre,
+        'cargo': cargo,
+        if (consentimiento) 'consentimiento': true,
+      },
       admin: true,
     ) as Map<String, dynamic>;
     return (
@@ -201,10 +323,13 @@ class Api {
 
   Future<void> desactivarEmpleado(int id) => _delete('/api/empleados/$id', admin: true);
 
-  /// Reemplaza las fotos del rostro del empleado (1 a 3 JPEG).
+  /// Reemplaza las fotos del rostro del empleado (1 a 3 JPEG). Sin la
+  /// autorización registrada el servidor no guarda datos biométricos: se envía
+  /// en la misma petición (solo se llega aquí después de que la confirmaron).
   Future<List<FotoRef>> subirFotos(int empleadoId, List<Uint8List> jpegs) async {
     final peticion = http.MultipartRequest('POST', uri('/api/empleados/$empleadoId/fotos'))
-      ..headers.addAll(cabeceras(admin: true, json: false));
+      ..headers.addAll(cabeceras(admin: true, json: false))
+      ..fields['consentimiento'] = '1';
     for (var i = 0; i < jpegs.length; i++) {
       peticion.files.add(http.MultipartFile.fromBytes('fotos[]', jpegs[i], filename: 'rostro_${i + 1}.jpg'));
     }
@@ -273,24 +398,37 @@ class Api {
 
   // ---------------------------------------------------------------- Usuarios y kioscos
 
-  Future<List<Usuario>> usuarios() async {
+  /// Cuentas de la empresa, con las apps habilitadas y el plan (para el formulario).
+  Future<EquipoEmpresa> usuarios() async {
     final j = await _get('/api/usuarios', admin: true) as Map<String, dynamic>;
-    return (j['usuarios'] as List).map((u) => Usuario.desdeJson(u as Map<String, dynamic>)).toList();
+    return EquipoEmpresa(
+      usuarios: (j['usuarios'] as List).map((u) => Usuario.desdeJson(u as Map<String, dynamic>)).toList(),
+      aplicativos: ((j['aplicativos'] as List?) ?? const []).cast<String>(),
+      plan: PlanEmpresa.desdeJson(j['plan'] as Map<String, dynamic>?),
+    );
   }
 
+  /// Crea o edita una cuenta. Los roles se envían siempre juntos (uno por app;
+  /// null = sin acceso a esa app) con sus sedes, porque se validan juntos.
   Future<Usuario> guardarUsuario({
     int? id,
-    String? nombre,
-    String? usuario,
+    required String nombre,
+    String? email,
     String? password,
-    Rol? rol,
+    RolAsistencia? rolAsistencia,
+    RolInventario? rolInventario,
+    required List<int> sedes,
+    String? documento,
     bool? activo,
   }) async {
     final cuerpo = {
-      'nombre': ?nombre,
-      'usuario': ?usuario,
+      'nombre': nombre,
+      'email': ?email,
       if (password != null && password.isNotEmpty) 'password': password,
-      'rol': ?rol?.api,
+      'rol_asistencia': rolAsistencia?.api,
+      'rol_inventario': rolInventario?.api,
+      'sedes': sedes,
+      'documento': documento,
       'activo': ?activo,
     };
     final j = (id == null

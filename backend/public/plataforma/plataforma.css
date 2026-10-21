@@ -1,0 +1,64 @@
+/* =========================================================================
+   Panel de plataforma · complementos sobre ../panel/app.css
+   Mismo sistema de diseño (tokens, botones, diálogos, tablas); aquí solo lo
+   propio: medidores de uso, tarjetas de plan y ajustes de formulario.
+   ========================================================================= */
+
+.sprite { position: absolute; overflow: hidden; }
+.error { color: var(--peligro); font-weight: 600; margin: 0 0 12px; }
+.campo--separado { margin-top: 16px; }
+.campo--en-linea { margin: 0; min-width: 180px; }
+.campo textarea {
+  width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 12px; resize: vertical;
+  border: 1px solid var(--borde-fuerte); background: var(--superficie-2); color: var(--texto); font: inherit;
+}
+.campo textarea:focus { outline: 2px solid var(--primario); outline-offset: 1px; }
+.check--centrado { align-self: center; margin-bottom: 16px; }
+.check--peligro input { accent-color: var(--peligro); }
+.tres-columnas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+/* ---- Celda de empresa ---- */
+.empresa__nombre { font-weight: 700; }
+.empresa__sub { color: var(--texto-suave); font-size: 13px; }
+
+/* ---- Medidores de uso: número + barra; el color nunca va solo ---- */
+.medidores { display: grid; gap: 6px; min-width: 190px; }
+.medidor { --c: var(--primario); display: grid; grid-template-columns: 74px 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.medidor__nombre { color: var(--texto-suave); }
+.medidor__pista { height: 6px; border-radius: 6px; background: color-mix(in srgb, var(--c) 16%, transparent); overflow: hidden; }
+.medidor__pista span { display: block; height: 100%; background: var(--c); border-radius: 6px; }
+.medidor__valor { font: 700 12.5px var(--f-mono); font-variant-numeric: tabular-nums; }
+.medidor--alto { --c: var(--alerta); }
+.medidor--lleno { --c: var(--peligro); }
+.medidor--lleno .medidor__valor::after { content: " · lleno"; color: var(--peligro); font-family: var(--f-texto); }
+
+.uso { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.uso .medidor { grid-template-columns: 1fr auto; padding: 12px; border-radius: 14px; border: 1px solid var(--borde); background: var(--superficie-2); }
+.uso .medidor__pista { grid-column: 1 / -1; }
+
+/* ---- Tarjetas de plan ---- */
+.planes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.plan-tarjeta {
+  display: grid; gap: 10px; padding: 18px; border-radius: var(--radio-lg); text-align: left; cursor: pointer;
+  background: var(--superficie); border: 1px solid var(--borde); color: var(--texto); font: inherit;
+  transition: border-color .18s, transform .18s;
+}
+.plan-tarjeta:hover { border-color: var(--primario); }
+.plan-tarjeta:focus-visible { outline: 2px solid var(--primario); outline-offset: 2px; }
+.plan-tarjeta--inactivo { opacity: .62; }
+.plan-tarjeta__cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.plan-tarjeta h3 { margin: 0; font: 700 20px var(--f-titulo); }
+.plan-tarjeta p { margin: 0; color: var(--texto-suave); font-size: 14px; }
+.plan-tarjeta dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.plan-tarjeta dt { font: 700 10.5px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--texto-suave); }
+.plan-tarjeta dd { margin: 2px 0 0; font: 700 22px var(--f-titulo); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 640px) {
+  .tres-columnas, .uso { grid-template-columns: 1fr; }
+  .medidores { min-width: 0; }
+  .campo--en-linea { min-width: 0; flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-tarjeta { transition: none; }
+}

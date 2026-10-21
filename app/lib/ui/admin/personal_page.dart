@@ -5,6 +5,7 @@ import '../../core/tema.dart';
 import '../../data/api.dart';
 import '../../data/modelos.dart';
 import '../comun/widgets.dart';
+import '../cuenta/plan_ui.dart';
 import '../horarios/widgets_horario.dart';
 import 'contexto_admin.dart';
 import 'empleado_form_page.dart';
@@ -57,6 +58,10 @@ class _PersonalPageState extends State<PersonalPage> {
   }
 
   Future<void> _abrir([Empleado? e]) async {
+    // Alguien nuevo ocupa un cupo de «personas» del plan: se avisa antes de
+    // pedir sus datos, no después.
+    if (e == null && !await hayCupo(context, _ctx.api, RecursoLimitado.personas)) return;
+    if (!mounted) return;
     final cambio = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ChangeNotifierProvider.value(value: _ctx, child: EmpleadoFormPage(empleado: e)),

@@ -21,17 +21,42 @@ final class Horarios
     public const MAX_BLOQUES = 4;
 
     private static ?array $cache = null;
+    private static ?int $empresaId = null;
 
-    /** Todos los turnos (también inactivos: el historial debe poder resolverse). */
+    /**
+     * Empresa de la petición en curso: los turnos son de cada empresa. La fija
+     * `Auth` al identificar a la persona o al kiosco.
+     */
+    public static function usarEmpresa(int $empresaId): void
+    {
+        if (self::$empresaId !== $empresaId) {
+            self::$empresaId = $empresaId;
+            self::$cache = null;
+        }
+    }
+
+    /** Los turnos de la empresa (también inactivos: el historial debe poder resolverse). */
     public static function todos(): array
     {
+        if (self::$empresaId === null) {
+            throw new \LogicException('Horarios::todos() sin empresa: falta Horarios::usarEmpresa()');
+        }
         if (self::$cache === null) {
             self::$cache = [];
-            foreach (Db::filas('SELECT id, nombre, bloques, dias, tolerancia_min, activo FROM asis_horarios') as $h) {
+            $filas = Db::filas(
+                'SELECT id, nombre, bloques, dias, tolerancia_min, activo FROM asis_horarios WHERE empresa_id = ?',
+                [self::$empresaId],
+            );
+            foreach ($filas as $h) {
                 self::$cache[(int) $h['id']] = self::aJson($h);
             }
         }
         return self::$cache;
+    }
+
+    public static function empresa(): int
+    {
+        return self::$empresaId ?? throw new \LogicException('Sin empresa en Horarios');
     }
 
     public static function limpiarCache(): void

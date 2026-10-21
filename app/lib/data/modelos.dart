@@ -14,18 +14,32 @@ enum TipoMarcacion {
 }
 
 class Sede {
-  const Sede({required this.id, required this.nombre, required this.codigo, this.direccion});
+  const Sede({
+    required this.id,
+    required this.nombre,
+    required this.codigo,
+    this.direccion,
+    this.telefono,
+    this.esPrincipal = false,
+    this.activo = true,
+  });
 
   final int id;
   final String nombre;
   final String codigo;
   final String? direccion;
+  final String? telefono;
+  final bool esPrincipal;
+  final bool activo;
 
   factory Sede.desdeJson(Map<String, dynamic> j) => Sede(
         id: (j['id'] as num).toInt(),
         nombre: j['nombre'] as String,
         codigo: (j['codigo'] ?? '') as String,
         direccion: j['direccion'] as String?,
+        telefono: j['telefono'] as String?,
+        esPrincipal: j['es_principal'] as bool? ?? false,
+        activo: j['activo'] as bool? ?? true,
       );
 
   Map<String, dynamic> aJson() => {'id': id, 'nombre': nombre, 'codigo': codigo, 'direccion': direccion};
@@ -94,6 +108,9 @@ class Empleado {
     this.activo = true,
     this.fotos = const [],
     this.turnoSemana,
+    this.consentimientoEn,
+    this.cuentaEmail,
+    this.cuentaActiva = true,
   });
 
   final int id;
@@ -107,20 +124,34 @@ class Empleado {
   /// Turno que le corresponde esta semana (null = sin horario asignado).
   final TurnoCorto? turnoSemana;
 
-  bool get tieneRostro => fotos.isNotEmpty;
+  /// Cuándo se registró su autorización de datos biométricos (Ley 1581).
+  final DateTime? consentimientoEn;
 
-  factory Empleado.desdeJson(Map<String, dynamic> j) => Empleado(
-        id: (j['id'] as num).toInt(),
-        sedeId: (j['sede_id'] as num).toInt(),
-        documento: j['documento'] as String,
-        nombre: j['nombre'] as String,
-        cargo: j['cargo'] as String?,
-        activo: j['activo'] as bool? ?? true,
-        fotos: ((j['fotos'] as List?) ?? const [])
-            .map((f) => FotoRef.desdeJson(f as Map<String, dynamic>))
-            .toList(),
-        turnoSemana: j['turno_semana'] == null ? null : TurnoCorto.desdeJson(j['turno_semana'] as Map<String, dynamic>),
-      );
+  /// Cuenta ligada (entra también a las apps con ese correo), o null.
+  final String? cuentaEmail;
+  final bool cuentaActiva;
+
+  bool get tieneRostro => fotos.isNotEmpty;
+  bool get tieneConsentimiento => consentimientoEn != null;
+
+  factory Empleado.desdeJson(Map<String, dynamic> j) {
+    final cuenta = j['cuenta'] as Map<String, dynamic>?;
+    return Empleado(
+      id: (j['id'] as num).toInt(),
+      sedeId: (j['sede_id'] as num).toInt(),
+      documento: j['documento'] as String,
+      nombre: j['nombre'] as String,
+      cargo: j['cargo'] as String?,
+      activo: j['activo'] as bool? ?? true,
+      fotos: ((j['fotos'] as List?) ?? const [])
+          .map((f) => FotoRef.desdeJson(f as Map<String, dynamic>))
+          .toList(),
+      turnoSemana: j['turno_semana'] == null ? null : TurnoCorto.desdeJson(j['turno_semana'] as Map<String, dynamic>),
+      consentimientoEn: j['consentimiento_en'] == null ? null : DateTime.parse(j['consentimiento_en'] as String),
+      cuentaEmail: cuenta?['email'] as String?,
+      cuentaActiva: cuenta?['activa'] as bool? ?? true,
+    );
+  }
 }
 
 /// Marcación guardada en el teléfono (pendiente o ya enviada).
@@ -204,6 +235,7 @@ class EmpleadoRemoto {
       );
 }
 
+/// Nivel de acceso dentro de esta app: lo que puede hacer en el kiosco.
 enum Rol {
   general('GENERAL', 'General'),
   administrativo('ADMINISTRATIVO', 'Administrativo');
@@ -212,36 +244,229 @@ enum Rol {
   final String api;
   final String etiqueta;
 
-  static Rol desdeApi(String v) => v == 'ADMINISTRATIVO' ? administrativo : general;
+  static Rol desdeApi(String? v) => v == 'ADMINISTRATIVO' ? administrativo : general;
+}
+
+/// Rol de la cuenta en Control de Personal (la misma cuenta tiene otro en Inventario).
+enum RolAsistencia {
+  admin('ADMIN', 'Administrador', 'Todo en la empresa: sedes, equipo, horarios y reportes'),
+  gerente('GERENTE', 'Gerente', 'Personal, horarios y reportes de sus sedes'),
+  operador('OPERADOR', 'Operador de kioscos', 'Vincula y atiende los kioscos');
+
+  const RolAsistencia(this.api, this.etiqueta, this.descripcion);
+  final String api;
+  final String etiqueta;
+  final String descripcion;
+
+  static RolAsistencia? desdeApi(String? v) => values.where((r) => r.api == v).firstOrNull;
+}
+
+/// Rol de la cuenta en la app de Inventario POS.
+enum RolInventario {
+  admin('ADMIN', 'Director'),
+  gerente('GERENTE', 'Gerente'),
+  auxiliar('AUXILIAR_INVENTARIO', 'Auxiliar de inventario'),
+  vendedor('VENDEDOR', 'Vendedor');
+
+  const RolInventario(this.api, this.etiqueta);
+  final String api;
+  final String etiqueta;
+
+  /// Vendedor y auxiliar pertenecen a exactamente una sede.
+  bool get unaSede => this == auxiliar || this == vendedor;
+
+  static RolInventario? desdeApi(String? v) => values.where((r) => r.api == v).firstOrNull;
+}
+
+/// Empresa de la cuenta, tal como la devuelve el login.
+class EmpresaRef {
+  const EmpresaRef({required this.uuid, required this.nombre});
+  final String uuid;
+  final String nombre;
+
+  static EmpresaRef? desdeJson(Map<String, dynamic>? j) =>
+      j == null ? null : EmpresaRef(uuid: j['uuid'] as String, nombre: j['nombre'] as String);
 }
 
 class SesionAdmin {
-  const SesionAdmin({required this.token, required this.nombre, required this.rol, required this.expira});
+  const SesionAdmin({
+    required this.token,
+    required this.nombre,
+    required this.rol,
+    required this.expira,
+    this.email = '',
+    this.rolAsistencia,
+    this.empresa,
+  });
   final String token;
   final String nombre;
+  final String email;
   final Rol rol;
+  final RolAsistencia? rolAsistencia;
+  final EmpresaRef? empresa;
   final DateTime expira;
 
   bool get vigente => DateTime.now().isBefore(expira);
   bool get esAdministrativo => rol == Rol.administrativo;
+
+  /// Dueño de la empresa: sedes, cuentas, turnos y datos de la empresa.
+  bool get esAdminEmpresa => rolAsistencia == RolAsistencia.admin;
 }
 
-/// Cuenta de la app de asistencia.
+/// Lo usado y el máximo de un recurso del plan (`maximo` null = sin límite).
+class RecursoPlan {
+  const RecursoPlan({required this.usados, this.maximo});
+  final int usados;
+  final int? maximo;
+
+  bool get lleno => maximo != null && usados >= maximo!;
+  bool get ilimitado => maximo == null;
+
+  /// Cuántos caben todavía (null = sin límite).
+  int? get disponibles => maximo == null ? null : (maximo! - usados).clamp(0, maximo!);
+
+  factory RecursoPlan.desdeJson(Map<String, dynamic>? j) => RecursoPlan(
+        usados: ((j?['usados'] as num?) ?? 0).toInt(),
+        maximo: (j?['maximo'] as num?)?.toInt(),
+      );
+
+  RecursoPlan conUnoMas() => RecursoPlan(usados: usados + 1, maximo: maximo);
+}
+
+/// Los recursos que limita un plan.
+enum RecursoLimitado {
+  sedes('sedes', 'Sedes', 'sede', 'sedes'),
+  personas('personas', 'Personas', 'persona', 'personas'),
+  productos('productos', 'Productos', 'producto', 'productos');
+
+  const RecursoLimitado(this.api, this.titulo, this.singular, this.plural);
+  final String api;
+  final String titulo;
+  final String singular;
+  final String plural;
+
+  static RecursoLimitado? desdeApi(String? v) => values.where((r) => r.api == v).firstOrNull;
+}
+
+/// Plan vigente de la empresa y su uso.
+class PlanEmpresa {
+  const PlanEmpresa({
+    required this.codigo,
+    required this.nombre,
+    required this.sedes,
+    required this.personas,
+    required this.productos,
+    this.vence,
+    this.vencido = false,
+  });
+
+  final String codigo;
+  final String nombre;
+  final DateTime? vence;
+  final bool vencido;
+  final RecursoPlan sedes;
+  final RecursoPlan personas;
+  final RecursoPlan productos;
+
+  bool get esGratis => codigo == 'GRATIS';
+
+  RecursoPlan de(RecursoLimitado r) => switch (r) {
+        RecursoLimitado.sedes => sedes,
+        RecursoLimitado.personas => personas,
+        RecursoLimitado.productos => productos,
+      };
+
+  static PlanEmpresa? desdeJson(Map<String, dynamic>? j) => j == null
+      ? null
+      : PlanEmpresa(
+          codigo: j['codigo'] as String,
+          nombre: j['nombre'] as String,
+          vence: j['vence'] == null ? null : DateTime.parse(j['vence'] as String),
+          vencido: j['vencido'] as bool? ?? false,
+          sedes: RecursoPlan.desdeJson(j['sedes'] as Map<String, dynamic>?),
+          personas: RecursoPlan.desdeJson(j['personas'] as Map<String, dynamic>?),
+          productos: RecursoPlan.desdeJson(j['productos'] as Map<String, dynamic>?),
+        );
+}
+
+/// Datos de la empresa, su plan y las apps que tiene habilitadas.
+class EmpresaInfo {
+  const EmpresaInfo({
+    required this.uuid,
+    required this.nombre,
+    this.nit,
+    this.telefono,
+    this.email,
+    this.plan,
+    this.aplicativos = const [],
+  });
+
+  final String uuid;
+  final String nombre;
+  final String? nit;
+  final String? telefono;
+  final String? email;
+  final PlanEmpresa? plan;
+  final List<String> aplicativos;
+
+  bool get tieneInventario => aplicativos.contains('INVENTARIO');
+
+  factory EmpresaInfo.desdeJson(Map<String, dynamic> j) {
+    final e = j['empresa'] as Map<String, dynamic>;
+    return EmpresaInfo(
+      uuid: e['uuid'] as String,
+      nombre: e['nombre'] as String,
+      nit: e['nit'] as String?,
+      telefono: e['telefono'] as String?,
+      email: e['email_contacto'] as String?,
+      plan: PlanEmpresa.desdeJson(j['plan'] as Map<String, dynamic>?),
+      aplicativos: ((j['aplicativos'] as List?) ?? const []).cast<String>(),
+    );
+  }
+}
+
+/// Cuenta de la empresa: una persona, un rol en cada app.
 class Usuario {
-  const Usuario({required this.id, required this.nombre, required this.usuario, required this.rol, required this.activo});
+  const Usuario({
+    required this.id,
+    required this.nombre,
+    required this.email,
+    required this.activo,
+    this.rolAsistencia,
+    this.rolInventario,
+    this.sedes = const [],
+    this.documento,
+  });
   final int id;
   final String nombre;
-  final String usuario;
-  final Rol rol;
+  final String email;
+  final RolAsistencia? rolAsistencia;
+  final RolInventario? rolInventario;
+  final List<int> sedes;
+  final String? documento;
   final bool activo;
+
+  /// Nivel de acceso en esta app (compatibilidad con el kiosco).
+  Rol get rol => rolAsistencia == RolAsistencia.operador ? Rol.general : Rol.administrativo;
 
   factory Usuario.desdeJson(Map<String, dynamic> j) => Usuario(
         id: (j['id'] as num).toInt(),
         nombre: j['nombre'] as String,
-        usuario: j['usuario'] as String,
-        rol: Rol.desdeApi(j['rol'] as String),
+        email: (j['email'] ?? j['usuario']) as String,
+        rolAsistencia: RolAsistencia.desdeApi(j['rol_asistencia'] as String?),
+        rolInventario: RolInventario.desdeApi(j['rol_inventario'] as String?),
+        sedes: ((j['sedes'] as List?) ?? const []).map((s) => (s as num).toInt()).toList(),
+        documento: j['documento'] as String?,
         activo: j['activo'] as bool? ?? true,
       );
+}
+
+/// Lista de cuentas con lo que hace falta para el formulario.
+class EquipoEmpresa {
+  const EquipoEmpresa({required this.usuarios, required this.aplicativos, this.plan});
+  final List<Usuario> usuarios;
+  final List<String> aplicativos;
+  final PlanEmpresa? plan;
 }
 
 class KioscoRegistrado {

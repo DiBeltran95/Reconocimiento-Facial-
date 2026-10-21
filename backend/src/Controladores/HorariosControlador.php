@@ -11,7 +11,12 @@ use App\Http\Response;
 use App\Servicios\Horarios;
 use App\Servicios\Tiempo;
 
-/** Turnos, rotaciones semanales y ajustes puntuales (solo administrativos). */
+/**
+ * Turnos, rotaciones semanales y ajustes puntuales (solo administrativos).
+ * Los turnos son de la empresa: los crea cualquier administrativo, pero
+ * editarlos o archivarlos solo el ADMIN (un turno lo pueden usar sedes que el
+ * gerente no gestiona).
+ */
 final class HorariosControlador
 {
     private const MAX_SECUENCIA = 8;
@@ -28,11 +33,11 @@ final class HorariosControlador
 
     public static function crear(Request $req): never
     {
-        Auth::admin($req);
+        $admin = Auth::admin($req);
         $d = self::validar($req->json());
         Db::query(
-            'INSERT INTO asis_horarios (nombre, bloques, dias, tolerancia_min) VALUES (?, ?, ?, ?)',
-            [$d['nombre'], $d['bloques'], $d['dias'], $d['tolerancia_min']],
+            'INSERT INTO asis_horarios (empresa_id, nombre, bloques, dias, tolerancia_min) VALUES (?, ?, ?, ?, ?)',
+            [$admin['empresa_id'], $d['nombre'], $d['bloques'], $d['dias'], $d['tolerancia_min']],
         );
         $id = (int) Db::pdo()->lastInsertId();
         Horarios::limpiarCache();
@@ -41,7 +46,7 @@ final class HorariosControlador
 
     public static function actualizar(Request $req): never
     {
-        Auth::admin($req);
+        Auth::adminEmpresa($req);
         $id = $req->param('id');
         $actual = Horarios::todos()[$id] ?? throw HttpError::noEncontrado('Turno');
         $d = self::validar($req->json() + $actual);
@@ -56,8 +61,8 @@ final class HorariosControlador
     /** Se archiva (no se borra): el historial de cumplimiento lo sigue usando. */
     public static function archivar(Request $req): never
     {
-        Auth::admin($req);
-        Db::query('UPDATE asis_horarios SET activo = 0 WHERE id = ?', [$req->param('id')]);
+        $admin = Auth::adminEmpresa($req);
+        Db::query('UPDATE asis_horarios SET activo = 0 WHERE id = ? AND empresa_id = ?', [$req->param('id'), $admin['empresa_id']]);
         Horarios::limpiarCache();
         Response::sinContenido();
     }
@@ -109,7 +114,14 @@ final class HorariosControlador
         if ($ids === [] || count($ids) > 500) {
             throw HttpError::validacion('Selecciona entre 1 y 500 empleados', 'empleados');
         }
-        foreach (Db::filas('SELECT id, sede_id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ')', $ids) as $e) {
+        $encontrados = Db::filas(
+            'SELECT id, sede_id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
+            [...$ids, $admin['empresa_id']],
+        );
+        if (count($encontrados) !== count($ids)) {
+            throw HttpError::noEncontrado('Empleado');
+        }
+        foreach ($encontrados as $e) {
             Auth::exigirSede($admin, (int) $e['sede_id']);
         }
         self::aplicarRotacion($ids, self::validarSecuencia($datos['secuencia'] ?? []), self::lunesDe($datos['desde'] ?? null));
@@ -195,7 +207,7 @@ final class HorariosControlador
 
     private static function empleado(int $id, array $admin): int
     {
-        $e = Db::fila('SELECT id, sede_id FROM asis_empleados WHERE id = ?', [$id]);
+        $e = Db::fila('SELECT id, sede_id FROM asis_empleados WHERE id = ? AND empresa_id = ?', [$id, $admin['empresa_id']]);
         if ($e === null) {
             throw HttpError::noEncontrado('Empleado');
         }

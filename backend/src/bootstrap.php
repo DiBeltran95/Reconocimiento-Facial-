@@ -23,6 +23,9 @@ date_default_timezone_set('UTC');
 mb_internal_encoding('UTF-8');
 
 set_exception_handler(static function (\Throwable $e): void {
+    // Reglas que impone la base (límite del plan, correo repetido…): son
+    // respuestas para el usuario, no errores del servidor.
+    $e = Servicios\Plan::traducir($e) ?? $e;
     if ($e instanceof Http\HttpError) {
         Http\Response::json(['error' => $e->getMessage()] + $e->extra, $e->status);
     }

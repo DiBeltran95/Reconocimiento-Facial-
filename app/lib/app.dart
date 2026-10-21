@@ -22,7 +22,7 @@ class ControlPersonalApp extends StatelessWidget {
       ],
       child: Consumer<Ajustes>(
         builder: (context, ajustes, _) => MaterialApp(
-          title: 'Control de Personal',
+          title: 'Presente',
           debugShowCheckedModeBanner: false,
           theme: construirTema(Brightness.light),
           darkTheme: construirTema(Brightness.dark),

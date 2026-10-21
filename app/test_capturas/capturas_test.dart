@@ -160,7 +160,8 @@ class _ApiFalsa extends Api {
   ];
 
   @override
-  Future<List<Sede>> sedes() async => [const Sede(id: 1, nombre: 'Sede principal', codigo: 'PRI')];
+  Future<List<Sede>> sedes({bool todas = false}) async =>
+      [const Sede(id: 1, nombre: 'Sede principal', codigo: 'PRI', esPrincipal: true)];
 
   @override
   Future<List<Horario>> horarios() async => _turnos.map(Horario.desdeJson).toList();
@@ -275,14 +276,39 @@ class _CamaraSimulada extends StatelessWidget {
 class _PintorPersona extends CustomPainter {
   @override
   void paint(Canvas c, Size s) {
+    // Fondo de oficina desenfocado con luces cálidas (bokeh).
     c.drawRect(Offset.zero & s, Paint()..shader = const LinearGradient(
       begin: Alignment.topCenter, end: Alignment.bottomCenter,
-      colors: [Color(0xFF3A4A5E), Color(0xFF1C2633)]).createShader(Offset.zero & s));
+      colors: [Color(0xFF2E3D55), Color(0xFF131B2B)]).createShader(Offset.zero & s));
+    for (final (x, y, r, col) in [
+      (0.12, 0.18, 70.0, const Color(0x33FBBF24)), (0.85, 0.12, 90.0, const Color(0x2922D3EE)),
+      (0.9, 0.55, 60.0, const Color(0x22A78BFA)), (0.08, 0.6, 80.0, const Color(0x1F60A5FA)),
+    ]) {
+      c.drawCircle(Offset(s.width * x, s.height * y), r, Paint()..color = col..maskFilter = const MaskFilter.blur(BlurStyle.normal, 30));
+    }
+    // Silueta anónima con luz de borde (se lee como "persona" sin mostrar un rostro real).
     final cara = Offset(s.width / 2, s.height * 0.40);
-    c.drawOval(Rect.fromCenter(center: cara, width: 200, height: 255), Paint()..color = const Color(0xFFC79B7F));
-    c.drawOval(Rect.fromCenter(center: cara.translate(0, -95), width: 215, height: 120), Paint()..color = const Color(0xFF2A1E18));
-    c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(s.width / 2, s.height * 0.78), width: 420, height: 380), const Radius.circular(160)),
-        Paint()..color = const Color(0xFF26415F));
+    final silueta = Path.combine(
+      PathOperation.union,
+      Path.combine(
+        PathOperation.union,
+        Path()..addOval(Rect.fromCenter(center: cara, width: 205, height: 262)),
+        Path()..addRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: cara.translate(0, 150), width: 96, height: 110), const Radius.circular(36))),
+      ),
+      Path()..addRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(s.width / 2, s.height * 0.80), width: 460, height: 400), const Radius.circular(190))),
+    );
+    c.drawPath(silueta, Paint()..shader = const LinearGradient(
+      begin: Alignment.topCenter, end: Alignment.bottomCenter,
+      colors: [Color(0xFF4A5D7A), Color(0xFF1B2638)]).createShader(Rect.fromLTWH(0, s.height * 0.2, s.width, s.height * 0.8)));
+    c.drawPath(silueta, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6
+      ..color = const Color(0x9922D3EE)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+    c.drawPath(silueta, Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = const Color(0xCC67E8F9));
   }
 
   @override
