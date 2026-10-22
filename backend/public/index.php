@@ -77,9 +77,11 @@ $r->put('/api/horarios/{id}', [Horarios::class, 'actualizar']);
 $r->delete('/api/horarios/{id}', [Horarios::class, 'archivar']);
 
 $r->get('/api/usuarios', [Usuarios::class, 'listar']);
+$r->get('/api/usuarios/candidatos', [Usuarios::class, 'candidatos']);
 $r->post('/api/usuarios', [Usuarios::class, 'crear']);
 $r->put('/api/usuarios/{id}', [Usuarios::class, 'actualizar']);
 $r->post('/api/usuarios/{id}/pausa', [Usuarios::class, 'pausar']);
+$r->delete('/api/usuarios/{id}', [Usuarios::class, 'quitar']);
 
 $r->get('/api/reportes/dia', [Reportes::class, 'dia']);
 $r->get('/api/reportes/dia.csv', [Reportes::class, 'diaCsv']);

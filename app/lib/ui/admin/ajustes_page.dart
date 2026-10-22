@@ -54,8 +54,8 @@ class AjustesPage extends StatelessWidget {
                 const Divider(),
                 _Enlace(
                   icono: Icons.manage_accounts_outlined,
-                  titulo: 'Equipo',
-                  detalle: 'Cuentas y su acceso a cada app',
+                  titulo: 'Cuentas de Presente',
+                  detalle: 'Quién entra a Presente y con qué rol',
                   alTocar: () => abrir(const UsuariosPage()),
                 ),
               ],

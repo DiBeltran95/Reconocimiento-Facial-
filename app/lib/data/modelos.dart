@@ -123,6 +123,10 @@ class Empleado {
     this.cuentaEmail,
     this.cuentaActiva = true,
     this.enPausa = false,
+    this.telefono,
+    this.email,
+    this.cuentaRolAsistencia,
+    this.cuentaRolInventario,
   });
 
   final int id;
@@ -146,6 +150,12 @@ class Empleado {
   /// En pausa porque el plan de Presente no alcanza para todos: no marca ni
   /// cuenta en el cupo hasta que el administrador la reactive.
   final bool enPausa;
+  final String? telefono;
+  final String? email;
+
+  /// Accesos de su cuenta: rol en Presente y en Ventario (null = no entra).
+  final RolAsistencia? cuentaRolAsistencia;
+  final String? cuentaRolInventario;
 
   bool get tieneRostro => fotos.isNotEmpty;
   bool get tieneConsentimiento => consentimientoEn != null;
@@ -167,6 +177,10 @@ class Empleado {
       cuentaEmail: cuenta?['email'] as String?,
       cuentaActiva: cuenta?['activa'] as bool? ?? true,
       enPausa: j['en_pausa'] as bool? ?? false,
+      telefono: j['telefono'] as String?,
+      email: j['email'] as String?,
+      cuentaRolAsistencia: RolAsistencia.desdeApi(cuenta?['rol_asistencia'] as String?),
+      cuentaRolInventario: cuenta?['rol_inventario'] as String?,
     );
   }
 }
@@ -281,39 +295,6 @@ enum RolAsistencia {
         'GENERAL' || 'OPERADOR' => operario,
         _ => values.where((r) => r.api == v).firstOrNull,
       };
-}
-
-/// Rol único de una cuenta en la plataforma: decide a qué app entra y con qué
-/// permisos. Administrador y gerente están en las dos; los demás, en una sola.
-enum RolCuenta {
-  admin('Administrador', 'Todo en la empresa, en las dos apps', RolAsistencia.admin, RolInventario.admin),
-  gerente('Gerente', 'Sus sedes, en las dos apps', RolAsistencia.gerente, RolInventario.gerente),
-  vendedor('Vendedor', 'Vende en su sede', null, RolInventario.vendedor),
-  auxiliar('Auxiliar de inventario', 'Registra entradas en su sede', null, RolInventario.auxiliar),
-  talentoHumano('Talento humano', 'Personal, rostros, turnos y reportes de todas las sedes', RolAsistencia.talentoHumano, null),
-  operario('Operario', 'Deja los teléfonos de marcación listos: una cuenta para todas las sedes', RolAsistencia.operario, null);
-
-  const RolCuenta(this.etiqueta, this.descripcion, this.asistencia, this.inventario);
-  final String etiqueta;
-  final String descripcion;
-  final RolAsistencia? asistencia;
-  final RolInventario? inventario;
-
-  bool get enLasDos => asistencia != null && inventario != null;
-  bool get soloVentario => asistencia == null;
-  bool get soloPresente => inventario == null;
-
-  /// Vendedor y auxiliar trabajan en una sede; el gerente, en las suyas.
-  bool get unaSede => inventario?.unaSede ?? false;
-  bool get conSedes => this == gerente || unaSede;
-
-  static RolCuenta? de(RolAsistencia? asistencia, RolInventario? inventario) {
-    if (inventario != null) {
-      return values.where((r) => r.inventario == inventario).firstOrNull;
-    }
-    return values.where((r) => r.asistencia == asistencia && r.inventario == null).firstOrNull ??
-        values.where((r) => r.asistencia == asistencia && asistencia != null).firstOrNull;
-  }
 }
 
 /// Rol de la cuenta en la app de Inventario POS.
@@ -516,6 +497,8 @@ class Usuario {
     this.sedes = const [],
     this.documento,
     this.pausaAsistencia = false,
+    this.telefono,
+    this.empleadoId,
   });
   final int id;
   final String nombre;
@@ -528,8 +511,13 @@ class Usuario {
 
   /// En pausa en Presente porque el plan no alcanza para todos.
   final bool pausaAsistencia;
+  final String? telefono;
 
-  RolCuenta? get rolCuenta => RolCuenta.de(rolAsistencia, rolInventario);
+  /// Empleado al que pertenece (null = cuenta técnica, como el operario).
+  final int? empleadoId;
+
+  bool get tieneVentario => rolInventario != null;
+
 
   factory Usuario.desdeJson(Map<String, dynamic> j) => Usuario(
         id: (j['id'] as num).toInt(),
@@ -541,6 +529,46 @@ class Usuario {
         documento: j['documento'] as String?,
         activo: j['activo'] as bool? ?? true,
         pausaAsistencia: j['pausa_asistencia'] as bool? ?? false,
+        telefono: j['telefono'] as String?,
+        empleadoId: (j['empleado_id'] as num?)?.toInt(),
+      );
+}
+
+/// Empleado que aún no tiene acceso a Presente (registrado aquí o en Ventario).
+class CandidatoCuenta {
+  const CandidatoCuenta({
+    required this.id,
+    required this.documento,
+    required this.nombre,
+    required this.sedeId,
+    required this.sede,
+    this.cargo,
+    this.telefono,
+    this.email,
+    this.conCuenta = false,
+  });
+  final int id;
+  final String documento;
+  final String nombre;
+  final int sedeId;
+  final String sede;
+  final String? cargo;
+  final String? telefono;
+  final String? email;
+
+  /// Ya entra a Ventario: con el mismo correo y contraseña entrará aquí.
+  final bool conCuenta;
+
+  factory CandidatoCuenta.desdeJson(Map<String, dynamic> j) => CandidatoCuenta(
+        id: (j['id'] as num).toInt(),
+        documento: j['documento'] as String,
+        nombre: j['nombre'] as String,
+        sedeId: (j['sede_id'] as num).toInt(),
+        sede: j['sede'] as String,
+        cargo: j['cargo'] as String?,
+        telefono: j['telefono'] as String?,
+        email: j['email'] as String?,
+        conCuenta: j['con_cuenta'] as bool? ?? false,
       );
 }
 

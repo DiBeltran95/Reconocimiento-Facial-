@@ -27,6 +27,8 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
   late final _documento = TextEditingController(text: widget.empleado?.documento);
   late final _nombre = TextEditingController(text: widget.empleado?.nombre);
   late final _cargo = TextEditingController(text: widget.empleado?.cargo);
+  late final _telefono = TextEditingController(text: widget.empleado?.telefono);
+  late final _email = TextEditingController(text: widget.empleado?.email);
   late int _sedeId = widget.empleado?.sedeId ?? _ctx.sede.id;
   late Empleado? _empleado = widget.empleado;
 
@@ -43,10 +45,14 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
     _documento.dispose();
     _nombre.dispose();
     _cargo.dispose();
+    _telefono.dispose();
+    _email.dispose();
     super.dispose();
   }
 
   Future<bool> _guardar() async {
+    // Un segundo toque mientras guarda no envía otra alta.
+    if (_guardando) return false;
     if (!_formulario.currentState!.validate()) return false;
     setState(() {
       _guardando = true;
@@ -55,16 +61,19 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
     });
     try {
       final cargo = _cargo.text.trim().isEmpty ? null : _cargo.text.trim();
+      final telefono = _telefono.text.trim().isEmpty ? null : _telefono.text.trim();
+      final email = _email.text.trim().isEmpty ? null : _email.text.trim().toLowerCase();
       if (_esNuevo) {
         final r = await _ctx.api.crearEmpleado(
           sedeId: _sedeId,
           documento: _documento.text,
           nombre: _nombre.text,
           cargo: cargo,
+          telefono: telefono,
+          email: email,
           consentimiento: _consentimiento,
         );
         _empleado = r.empleado;
-        if (mounted) avisar(context, r.reactivado ? 'Empleado reactivado' : 'Empleado creado');
       } else {
         _empleado = await _ctx.api.actualizarEmpleado(
           _empleado!.id,
@@ -72,8 +81,10 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
           documento: _documento.text,
           nombre: _nombre.text,
           cargo: cargo,
+          telefono: telefono,
+          email: email,
         );
-        if (mounted) avisar(context, 'Cambios guardados');
+
       }
       _cambio = true;
       _actualizarKiosco();
@@ -93,6 +104,43 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
   }
 
   void _actualizarKiosco() => context.read<EstadoApp>().sincronizador?.sincronizar();
+
+  /// Botón principal: guarda y sale del formulario (así un segundo toque no
+  /// crea a la persona otra vez). Al crear, ofrece registrar el rostro ya.
+  Future<void> _guardarYSalir() async {
+    final eraNuevo = _esNuevo;
+    if (!await _guardar() || !mounted) return;
+    if (eraNuevo && _consentimiento) {
+      final ahora = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (c) => AlertDialog(
+          icon: Icon(Icons.check_circle_outline_rounded, color: c.sem.entrada),
+          title: Text('${_empleado!.nombre} quedó registrado'),
+          content: const Text('Para que pueda marcar asistencia falta registrar su rostro. ¿Lo haces ahora?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Después')),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(c, true),
+              icon: const Icon(Icons.face_retouching_natural_rounded),
+              label: const Text('Registrar rostro'),
+            ),
+          ],
+        ),
+      );
+      if (ahora == true && mounted) await _registrarRostro();
+    }
+    if (!mounted) return;
+    avisar(
+      context,
+      !eraNuevo
+          ? 'Cambios guardados'
+          : (_empleado?.tieneRostro ?? false)
+              ? 'Empleado creado con su rostro: ya puede marcar'
+              : 'Empleado creado. Ábrelo cuando quieras para registrar su rostro.',
+    );
+    Navigator.of(context).pop(true);
+  }
 
   Future<void> _registrarRostro() async {
     if (_esNuevo && !await _guardar()) return;
@@ -206,6 +254,34 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
                 maxLength: 60,
               ),
               const SizedBox(height: Espacio.xs),
+              TextFormField(
+                controller: _telefono,
+                decoration: InputDecoration(
+                  labelText: 'Teléfono (opcional)',
+                  prefixIcon: const Icon(Icons.call_outlined),
+                  errorText: _errorDe('telefono'),
+                ),
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: Espacio.md),
+              TextFormField(
+                controller: _email,
+                decoration: InputDecoration(
+                  labelText: 'Correo (opcional)',
+                  helperText: 'Con él se le puede dar acceso a Presente o a Ventario sin volver a escribir sus datos.',
+                  helperMaxLines: 2,
+                  prefixIcon: const Icon(Icons.alternate_email_rounded),
+                  errorText: _errorDe('email'),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                autocorrect: false,
+                validator: (v) {
+                  final t = (v ?? '').trim();
+                  return t.isEmpty || RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(t) ? null : 'Escribe un correo válido';
+                },
+              ),
+              const SizedBox(height: Espacio.md),
               DropdownButtonFormField<int>(
                 initialValue: _ctx.sedes.any((s) => s.id == _sedeId) ? _sedeId : null,
                 decoration: InputDecoration(
@@ -255,7 +331,7 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
         bottomNavigationBar: SafeArea(
           minimum: const EdgeInsets.all(Espacio.md),
           child: FilledButton.icon(
-            onPressed: _guardando ? null : _guardar,
+            onPressed: _guardando ? null : _guardarYSalir,
             icon: _guardando
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5))
                 : const Icon(Icons.save_outlined),

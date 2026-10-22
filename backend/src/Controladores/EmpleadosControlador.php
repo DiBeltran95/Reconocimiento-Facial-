@@ -17,15 +17,18 @@ use App\Servicios\Tiempo;
  *
  * Plataforma multiempresa: todo se acota a la empresa y a las sedes del
  * administrativo (las del gerente, o todas las de la empresa para el ADMIN).
- * Un empleado puede estar LIGADO a una cuenta (`usuario_id`): es la misma
- * persona que entra a Inventario, cuenta una sola vez en el cupo del plan y,
- * si su cuenta se inactiva, deja de poder marcar.
+ * El empleado es UNO para las dos apps: se registra aquí o en Ventario (con
+ * documento, teléfono y correo) y aparece en las dos. Puede estar LIGADO a una
+ * cuenta de acceso (`usuario_id`) de Presente, de Ventario o de ambas; cuenta
+ * una sola vez en el cupo del plan y, si su cuenta se inactiva, deja de poder
+ * marcar.
  */
 final class EmpleadosControlador
 {
     /** Un empleado ligado solo está activo si su cuenta también lo está. */
     private const SELECT = "SELECT e.id, e.empresa_id, e.sede_id, e.usuario_id, e.documento, e.nombre, e.cargo,
-                                   e.activo, e.en_pausa, e.consentimiento_en, u.email AS cuenta_email,
+                                   e.telefono, e.email, e.activo, e.en_pausa, e.consentimiento_en, u.email AS cuenta_email,
+                                   u.rol AS cuenta_rol, u.rol_asistencia AS cuenta_rol_asistencia,
                                    (e.usuario_id IS NOT NULL AND (u.activo <> 1 OR u.deleted_at IS NOT NULL)) AS cuenta_inactiva
                               FROM asis_empleados e
                               LEFT JOIN usuarios u ON u.id = e.usuario_id";
@@ -91,15 +94,16 @@ final class EmpleadosControlador
             // Reingreso: se reactiva el mismo registro y conserva su historial.
             // El cupo del plan lo exige la base (LIMITE_PLAN → 409).
             Db::query(
-                'UPDATE asis_empleados SET sede_id = ?, nombre = ?, cargo = ?, activo = 1 WHERE id = ?',
-                [$d['sede_id'], $d['nombre'], $d['cargo'], $existente['id']],
+                'UPDATE asis_empleados SET sede_id = ?, nombre = ?, cargo = ?, telefono = ?, email = ?, activo = 1 WHERE id = ?',
+                [$d['sede_id'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email'], $existente['id']],
             );
             $id = (int) $existente['id'];
             $estado = 200;
         } else {
             Db::query(
-                'INSERT INTO asis_empleados (empresa_id, sede_id, documento, nombre, cargo) VALUES (?, ?, ?, ?, ?)',
-                [$admin['empresa_id'], $d['sede_id'], $d['documento'], $d['nombre'], $d['cargo']],
+                'INSERT INTO asis_empleados (empresa_id, sede_id, documento, nombre, cargo, telefono, email)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [$admin['empresa_id'], $d['sede_id'], $d['documento'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email']],
             );
             $id = (int) Db::pdo()->lastInsertId();
             $estado = 201;
@@ -125,6 +129,8 @@ final class EmpleadosControlador
             'documento' => $actual['documento'],
             'nombre'    => $actual['nombre'],
             'cargo'     => $actual['cargo'],
+            'telefono'  => $actual['telefono'],
+            'email'     => $actual['email'],
         ], $admin['empresa_id']);
         Auth::exigirSede($admin, $d['sede_id']);
 
@@ -137,9 +143,16 @@ final class EmpleadosControlador
         }
 
         Db::query(
-            'UPDATE asis_empleados SET sede_id = ?, documento = ?, nombre = ?, cargo = ? WHERE id = ?',
-            [$d['sede_id'], $d['documento'], $d['nombre'], $d['cargo'], $actual['id']],
+            'UPDATE asis_empleados SET sede_id = ?, documento = ?, nombre = ?, cargo = ?, telefono = ?, email = ? WHERE id = ?',
+            [$d['sede_id'], $d['documento'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email'], $actual['id']],
         );
+        if ($actual['usuario_id'] !== null) {
+            // Es la misma persona en su cuenta (el correo de entrada no se toca).
+            Db::query(
+                'UPDATE usuarios SET nombre = ?, documento = ?, telefono = ? WHERE id = ? AND empresa_id = ?',
+                [$d['nombre'], $d['documento'], $d['telefono'], $actual['usuario_id'], $admin['empresa_id']],
+            );
+        }
         if (($req->json()['consentimiento'] ?? false) === true && $actual['consentimiento_en'] === null) {
             self::registrarConsentimiento((int) $actual['id'], $admin['id']);
         }
@@ -251,12 +264,19 @@ final class EmpleadosControlador
             'documento'         => $e['documento'],
             'nombre'            => $e['nombre'],
             'cargo'             => $e['cargo'],
+            'telefono'          => $e['telefono'] ?? null,
+            'email'             => $e['email'] ?? null,
             'activo'            => (int) $e['activo'] === 1,
             // En pausa por el plan: no ocupa cupo ni puede marcar hasta reactivarla.
             'en_pausa'          => (int) ($e['en_pausa'] ?? 0) === 1,
             // Ligado a una cuenta: entra también a las apps con ese correo.
             'cuenta'            => isset($e['usuario_id']) && $e['usuario_id'] !== null
-                ? ['email' => $e['cuenta_email'], 'activa' => !(bool) $e['cuenta_inactiva']]
+                ? [
+                    'email'          => $e['cuenta_email'],
+                    'activa'         => !(bool) $e['cuenta_inactiva'],
+                    'rol_asistencia' => $e['cuenta_rol_asistencia'] ?? null,
+                    'rol_inventario' => $e['cuenta_rol'] ?? null,
+                ]
                 : null,
             'consentimiento_en' => isset($e['consentimiento_en']) && $e['consentimiento_en'] !== null
                 ? Tiempo::utcSqlAIsoUtc((string) $e['consentimiento_en'])
@@ -288,7 +308,7 @@ final class EmpleadosControlador
         Db::query('UPDATE asis_empleados SET updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?', [$id]);
     }
 
-    /** @return array{sede_id:int, documento:string, nombre:string, cargo:?string} */
+    /** @return array{sede_id:int, documento:string, nombre:string, cargo:?string, telefono:?string, email:?string} */
     private static function validar(array $datos, int $empresaId): array
     {
         $documento = preg_replace('/[\s.]/', '', (string) ($datos['documento'] ?? ''));
@@ -315,11 +335,22 @@ final class EmpleadosControlador
             throw HttpError::validacion('Selecciona una sede válida', 'sede_id');
         }
 
+        $telefono = trim((string) ($datos['telefono'] ?? ''));
+        if (mb_strlen($telefono) > 30) {
+            throw HttpError::validacion('El teléfono admite máximo 30 caracteres', 'telefono');
+        }
+        $email = mb_strtolower(trim((string) ($datos['email'] ?? '')));
+        if ($email !== '' && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 191)) {
+            throw HttpError::validacion('Escribe un correo válido', 'email');
+        }
+
         return [
             'sede_id'   => $sedeId,
             'documento' => strtoupper($documento),
             'nombre'    => $nombre,
             'cargo'     => $cargo === '' ? null : $cargo,
+            'telefono'  => $telefono === '' ? null : $telefono,
+            'email'     => $email === '' ? null : $email,
         ];
     }
 }

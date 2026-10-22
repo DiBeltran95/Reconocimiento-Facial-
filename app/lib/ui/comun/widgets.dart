@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -319,8 +320,66 @@ class Pildora extends StatelessWidget {
   }
 }
 
+/// Aviso flotante vigente (se reemplaza si llega otro).
+OverlayEntry? _avisoFlotante;
+
 /// Mensaje breve en la parte inferior.
+///
+/// Desde una hoja inferior o un diálogo, el snackbar quedaría DETRÁS de ellos
+/// y la persona no vería el mensaje: ahí el aviso flota arriba, encima de todo.
 void avisar(BuildContext context, String mensaje, {bool error = false}) {
+  final color = error ? const Color(0xFFFB7185) : const Color(0xFF34D399);
+  final overlay = ModalRoute.of(context) is PopupRoute ? Overlay.maybeOf(context, rootOverlay: true) : null;
+  if (overlay != null) {
+    _avisoFlotante?.remove();
+    late final OverlayEntry entrada;
+    void quitar() {
+      if (_avisoFlotante == entrada) _avisoFlotante = null;
+      if (entrada.mounted) entrada.remove();
+    }
+
+    entrada = OverlayEntry(
+      builder: (_) => Positioned(
+        top: 0,
+        left: 0,
+        right: 0,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Espacio.md, Espacio.xs, Espacio.md, 0),
+            child: Semantics(
+              liveRegion: true,
+              child: Material(
+                color: Hud.panel,
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(Redondeo.md),
+                  side: BorderSide(color: color.withValues(alpha: 0.6)),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(Redondeo.md),
+                  onTap: quitar,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: Espacio.md, vertical: Espacio.sm),
+                    child: Row(
+                      children: [
+                        Icon(error ? Icons.error_outline_rounded : Icons.check_circle_outline_rounded, color: color, size: 20),
+                        const SizedBox(width: Espacio.sm),
+                        Expanded(child: Text(mensaje, style: const TextStyle(color: Hud.texto))),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    _avisoFlotante = entrada;
+    overlay.insert(entrada);
+    Timer(const Duration(seconds: 4), quitar);
+    return;
+  }
   final m = ScaffoldMessenger.of(context);
   m.hideCurrentSnackBar();
   m.showSnackBar(

@@ -59,17 +59,16 @@ void main() {
   });
 
   group('Cuentas', () {
-    test('una cuenta trae un rol por app y sus sedes', () {
+    test('los roles son independientes: gerente en Presente y vendedor en Ventario', () {
       final u = Usuario.desdeJson(jsonDecode('''{
-        "id": 7, "uuid": "x", "nombre": "Ana", "email": "ana@ej.co", "documento": null,
+        "id": 7, "uuid": "x", "nombre": "Ana", "email": "ana@ej.co", "documento": "123",
         "rol": "ADMINISTRATIVO", "rol_asistencia": "GERENTE", "rol_inventario": "VENDEDOR",
-        "sedes": [2], "activo": true}''') as Map<String, dynamic>);
+        "sedes": [2], "activo": true, "empleado_id": 4, "telefono": "300"}''') as Map<String, dynamic>);
       expect(u.rolAsistencia, RolAsistencia.gerente);
       expect(u.rolInventario, RolInventario.vendedor);
-      expect(u.rolInventario!.unaSede, isTrue);
+      expect(u.tieneVentario, isTrue);
+      expect(u.empleadoId, 4);
       expect(u.sedes, [2]);
-      // Combinación anterior (ya no la admite el servidor): manda el rol de Ventario.
-      expect(u.rolCuenta, RolCuenta.vendedor);
     });
 
     test('sin rol en Inventario queda null; OPERADOR y GENERAL son el operario', () {
@@ -79,22 +78,29 @@ void main() {
       });
       expect(u.rolInventario, isNull);
       expect(u.rolAsistencia, RolAsistencia.operario);
-      expect(u.rolCuenta, RolCuenta.operario);
+      expect(u.tieneVentario, isFalse);
+      expect(u.empleadoId, isNull, reason: 'el operario es una cuenta técnica');
       expect(u.pausaAsistencia, isTrue);
       expect(RolAsistencia.desdeApi('GENERAL'), RolAsistencia.operario);
     });
 
-    test('el rol único decide a qué app entra la cuenta', () {
-      expect(RolCuenta.admin.enLasDos, isTrue);
-      expect(RolCuenta.gerente.enLasDos, isTrue);
-      expect(RolCuenta.vendedor.soloVentario, isTrue);
-      expect(RolCuenta.auxiliar.unaSede, isTrue);
-      expect(RolCuenta.talentoHumano.soloPresente, isTrue);
-      expect(RolCuenta.operario.conSedes, isFalse);
-      expect(RolCuenta.de(RolAsistencia.admin, RolInventario.admin), RolCuenta.admin);
-      expect(RolCuenta.de(RolAsistencia.talentoHumano, null), RolCuenta.talentoHumano);
-      expect(RolCuenta.de(null, RolInventario.vendedor), RolCuenta.vendedor);
-      expect(RolCuenta.de(null, null), isNull);
+    test('el empleado trae teléfono, correo y sus accesos', () {
+      final e = Empleado.desdeJson({
+        'id': 3, 'sede_id': 1, 'documento': '1055', 'nombre': 'Luz', 'telefono': '3001234567', 'email': 'luz@ej.co',
+        'cuenta': {'email': 'luz@ej.co', 'activa': true, 'rol_asistencia': null, 'rol_inventario': 'VENDEDOR'},
+      });
+      expect(e.telefono, '3001234567');
+      expect(e.email, 'luz@ej.co');
+      expect(e.cuentaRolAsistencia, isNull);
+      expect(e.cuentaRolInventario, 'VENDEDOR');
+    });
+
+    test('un candidato sabe si ya entra a Ventario', () {
+      final c = CandidatoCuenta.desdeJson({
+        'id': 3, 'documento': '1055', 'nombre': 'Luz', 'sede_id': 1, 'sede': 'Centro', 'email': 'luz@ej.co', 'con_cuenta': true,
+      });
+      expect(c.conCuenta, isTrue);
+      expect(c.sede, 'Centro');
     });
 
     test('la sesión del operario no entra al panel', () {

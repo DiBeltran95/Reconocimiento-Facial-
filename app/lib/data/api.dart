@@ -313,6 +313,8 @@ class Api {
     required String documento,
     required String nombre,
     String? cargo,
+    String? telefono,
+    String? email,
     bool consentimiento = false,
   }) async {
     final j = await _post(
@@ -322,6 +324,8 @@ class Api {
         'documento': documento,
         'nombre': nombre,
         'cargo': cargo,
+        'telefono': telefono,
+        'email': email,
         if (consentimiento) 'consentimiento': true,
       },
       admin: true,
@@ -338,10 +342,12 @@ class Api {
     required String documento,
     required String nombre,
     String? cargo,
+    String? telefono,
+    String? email,
   }) async {
     final j = await _put(
       '/api/empleados/$id',
-      {'sede_id': sedeId, 'documento': documento, 'nombre': nombre, 'cargo': cargo},
+      {'sede_id': sedeId, 'documento': documento, 'nombre': nombre, 'cargo': cargo, 'telefono': telefono, 'email': email},
       admin: true,
     ) as Map<String, dynamic>;
     return Empleado.desdeJson(j['empleado'] as Map<String, dynamic>);
@@ -434,34 +440,50 @@ class Api {
     );
   }
 
-  /// Crea o edita una cuenta. Los roles se envían siempre juntos (uno por app;
-  /// null = sin acceso a esa app) con sus sedes, porque se validan juntos.
-  Future<Usuario> guardarUsuario({
-    int? id,
-    required String nombre,
+  /// Empleados (de cualquiera de las dos apps) que aún no tienen acceso a Presente.
+  Future<List<CandidatoCuenta>> candidatosCuenta({String? q}) async {
+    final j = await _get('/api/usuarios/candidatos', query: {if (q != null && q.isNotEmpty) 'q': q}, admin: true)
+        as Map<String, dynamic>;
+    return (j['empleados'] as List).map((e) => CandidatoCuenta.desdeJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Da acceso a Presente a un empleado (o crea la cuenta técnica del operario,
+  /// sin empleado). La contraseña se genera al azar: la persona crea la suya
+  /// con «¿Olvidaste tu contraseña?». [cuentaExistente]: ya entraba a Ventario.
+  Future<({Usuario usuario, bool cuentaExistente, bool avisoEnviado})> crearCuenta({
+    required RolAsistencia rol,
+    int? empleadoId,
+    List<int> sedes = const [],
     String? email,
-    String? password,
-    RolAsistencia? rolAsistencia,
-    RolInventario? rolInventario,
-    required List<int> sedes,
-    String? documento,
-    bool? activo,
+    String? nombre,
   }) async {
-    final cuerpo = {
-      'nombre': nombre,
-      'email': ?email,
-      if (password != null && password.isNotEmpty) 'password': password,
-      'rol_asistencia': rolAsistencia?.api,
-      'rol_inventario': rolInventario?.api,
+    final j = await _post('/api/usuarios', {
+      'rol_asistencia': rol.api,
+      'empleado_id': ?empleadoId,
       'sedes': sedes,
-      'documento': documento,
+      'email': ?email,
+      'nombre': ?nombre,
+    }, admin: true) as Map<String, dynamic>;
+    return (
+      usuario: Usuario.desdeJson(j['usuario'] as Map<String, dynamic>),
+      cuentaExistente: j['cuenta_existente'] as bool? ?? false,
+      avisoEnviado: j['aviso_enviado'] as bool? ?? false,
+    );
+  }
+
+  /// Cambia el rol de Presente, las sedes (gerente), el estado o el nombre (operario).
+  Future<Usuario> actualizarCuenta(int id, {RolAsistencia? rol, List<int>? sedes, bool? activo, String? nombre}) async {
+    final j = await _put('/api/usuarios/$id', {
+      'rol_asistencia': ?rol?.api,
+      'sedes': ?sedes,
       'activo': ?activo,
-    };
-    final j = (id == null
-        ? await _post('/api/usuarios', cuerpo, admin: true)
-        : await _put('/api/usuarios/$id', cuerpo, admin: true)) as Map<String, dynamic>;
+      'nombre': ?nombre,
+    }, admin: true) as Map<String, dynamic>;
     return Usuario.desdeJson(j['usuario'] as Map<String, dynamic>);
   }
+
+  /// Quita el acceso a Presente (si también entra a Ventario, allá sigue igual).
+  Future<void> quitarAcceso(int id) => _delete('/api/usuarios/$id', admin: true);
 
   Future<List<KioscoRegistrado>> kioscos() async {
     final j = await _get('/api/dispositivos', admin: true) as Map<String, dynamic>;

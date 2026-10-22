@@ -6,14 +6,14 @@ import '../../data/api.dart';
 import '../../data/modelos.dart';
 import '../comun/widgets.dart';
 import '../cuenta/plan_ui.dart';
-import '../cuenta/registro_empresa_page.dart' show FortalezaClave;
 import 'acceso_admin.dart';
 import 'contexto_admin.dart';
 
-/// Equipo: las cuentas de la empresa. Una cuenta es UNA persona para las dos
-/// apps de la plataforma, con UN rol que decide a cuál entra: administrador y
-/// gerente en las dos; vendedor y auxiliar solo en Ventario; talento humano y
-/// operario solo en Presente. Solo el administrador la gestiona.
+/// Cuentas de acceso a Presente. El empleado es uno solo para las dos apps (se
+/// registra en «Personal» o en Ventario); aquí se le da acceso a Presente con
+/// un rol de Presente: gerente, talento humano u operario. Su acceso a Ventario
+/// lo decide Ventario. El operario es una cuenta técnica (los teléfonos de
+/// marcación), sin empleado. Solo el administrador gestiona las cuentas.
 class UsuariosPage extends StatefulWidget {
   const UsuariosPage({super.key});
 
@@ -25,7 +25,6 @@ class _UsuariosPageState extends State<UsuariosPage> {
   late final ContextoAdmin _ctx = context.read<ContextoAdmin>();
   Api get _api => _ctx.api;
   EquipoEmpresa? _equipo;
-  List<Sede> _sedes = const [];
   String? _error;
 
   @override
@@ -37,13 +36,9 @@ class _UsuariosPageState extends State<UsuariosPage> {
   Future<void> _cargar() async {
     try {
       final equipo = await _api.usuarios();
-      // Las sedes de Presente (el servidor valida contra ellas). Las que solo
-      // usa Ventario se asignan desde Ventario.
-      final sedes = await _api.sedes();
       if (mounted) {
         setState(() {
           _equipo = equipo;
-          _sedes = sedes;
           _error = null;
         });
       }
@@ -53,32 +48,22 @@ class _UsuariosPageState extends State<UsuariosPage> {
   }
 
   Future<void> _abrir([Usuario? u]) async {
-    final equipo = _equipo;
-    if (equipo == null) return;
-    // Una cuenta nueva ocupa un cupo de «personas»: se avisa antes de llenar el formulario.
-    if (u == null && !await hayCupo(context, _api, RecursoLimitado.personas)) return;
-    if (!mounted) return;
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _FormUsuario(
-        api: _api,
-        usuario: u,
-        sedes: _sedes,
-        conInventario: equipo.aplicativos.contains('INVENTARIO'),
-      ),
+      builder: (_) => u == null
+          ? _FormNuevaCuenta(api: _api, sedes: _ctx.sedes)
+          : _FormCuenta(api: _api, usuario: u, sedes: _ctx.sedes),
     );
     if (ok == true) _cargar();
   }
 
   String _sedesDe(Usuario u) {
-    final rol = u.rolCuenta;
-    if (rol == RolCuenta.admin) return 'Todas las sedes';
-    if (rol == RolCuenta.talentoHumano || rol == RolCuenta.operario) return 'Todas las sedes de Presente';
+    if (u.rolAsistencia != RolAsistencia.gerente) return 'Todas las sedes';
     if (u.sedes.isEmpty) return 'Sin sedes asignadas';
-    return u.sedes.map((id) => _sedes.where((s) => s.id == id).firstOrNull?.nombre ?? 'Sede $id').join(', ');
+    return u.sedes.map((id) => _ctx.sedes.where((s) => s.id == id).firstOrNull?.nombre ?? 'Sede $id').join(', ');
   }
 
   @override
@@ -86,11 +71,11 @@ class _UsuariosPageState extends State<UsuariosPage> {
     final equipo = _equipo;
     final sem = context.sem;
     return Scaffold(
-      appBar: AppBar(title: const Text('Equipo')),
+      appBar: AppBar(title: const Text('Cuentas de Presente')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: equipo == null ? null : () => _abrir(),
         icon: const Icon(Icons.person_add_alt_rounded),
-        label: const Text('Nueva cuenta'),
+        label: const Text('Dar acceso'),
       ),
       body: RefreshIndicator(
         onRefresh: _cargar,
@@ -108,18 +93,13 @@ class _UsuariosPageState extends State<UsuariosPage> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            'Cada cuenta entra con su correo a las apps que le da su rol.',
+                            'Quién entra a Presente y con qué rol. Los empleados se registran en «Personal» '
+                            '(o en Ventario); aquí solo se les da acceso.',
                             style: context.textos.bodyMedium,
                           ),
                           if (equipo.plan != null) ...[
                             const SizedBox(height: Espacio.md),
                             MedidorUso(recurso: RecursoLimitado.personas, uso: equipo.plan!.personas),
-                            const SizedBox(height: Espacio.xxs),
-                            Text(
-                              'Personas en el plan de Presente. Si no alcanza, pausa a quien no la use: '
-                              'su cuenta sigue en Ventario.',
-                              style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
-                            ),
                           ],
                         ],
                       ),
@@ -153,17 +133,12 @@ class _UsuariosPageState extends State<UsuariosPage> {
                                         children: [
                                           if (!u.activo) Pildora(texto: 'Inactiva', color: sem.peligro),
                                           Pildora(
-                                            texto: u.rolCuenta?.etiqueta ?? 'Sin rol',
+                                            texto: u.rolAsistencia?.etiqueta ?? 'Sin rol',
                                             color: context.colores.primary,
                                           ),
-                                          if (u.rolAsistencia != null)
-                                            Pildora(
-                                              texto: u.pausaAsistencia ? 'Presente · en pausa' : 'Presente',
-                                              color: u.pausaAsistencia ? sem.alerta : sem.entrada,
-                                              icono: Icons.face_unlock_outlined,
-                                            ),
-                                          if (u.rolInventario != null)
-                                            Pildora(texto: 'Ventario', color: sem.salida, icono: Icons.point_of_sale_outlined),
+                                          if (u.pausaAsistencia) Pildora(texto: 'En pausa', color: sem.alerta),
+                                          if (u.empleadoId == null && u.rolAsistencia == RolAsistencia.operario)
+                                            Pildora(texto: 'Cuenta técnica', color: sem.textoSuave),
                                         ],
                                       ),
                                       const SizedBox(height: Espacio.xxs),
@@ -185,98 +160,310 @@ class _UsuariosPageState extends State<UsuariosPage> {
   }
 }
 
-class _FormUsuario extends StatefulWidget {
-  const _FormUsuario({required this.api, required this.sedes, required this.conInventario, this.usuario});
+/// Roles que se dan desde Presente (el administrador es el dueño de la empresa).
+const _rolesAsignables = [RolAsistencia.gerente, RolAsistencia.talentoHumano, RolAsistencia.operario];
+
+// ─── Nueva cuenta ───────────────────────────────────────────────────────────
+
+class _FormNuevaCuenta extends StatefulWidget {
+  const _FormNuevaCuenta({required this.api, required this.sedes});
   final Api api;
-  final Usuario? usuario;
   final List<Sede> sedes;
-  final bool conInventario;
 
   @override
-  State<_FormUsuario> createState() => _FormUsuarioState();
+  State<_FormNuevaCuenta> createState() => _FormNuevaCuentaState();
 }
 
-class _FormUsuarioState extends State<_FormUsuario> {
+class _FormNuevaCuentaState extends State<_FormNuevaCuenta> {
   final _form = GlobalKey<FormState>();
-  late final _nombre = TextEditingController(text: widget.usuario?.nombre);
-  late final _email = TextEditingController(text: widget.usuario?.email);
-  late final _documento = TextEditingController(text: widget.usuario?.documento);
-  final _clave = TextEditingController();
-  late RolCuenta? _rol = widget.usuario?.rolCuenta;
-  late final Set<int> _sedes = {...?widget.usuario?.sedes};
-  late bool _activo = widget.usuario?.activo ?? true;
-  late bool _pausa = widget.usuario?.pausaAsistencia ?? false;
-  bool _guardando = false;
-  bool _ocultar = true;
-  String? _error;
-  String? _errorRol;
+  final _buscar = TextEditingController();
+  final _email = TextEditingController();
+  final _nombre = TextEditingController();
 
-  bool get _nuevo => widget.usuario == null;
+  /// true = cuenta técnica del operario (sin empleado).
+  bool _tecnica = false;
+  CandidatoCuenta? _empleado;
+  RolAsistencia _rol = RolAsistencia.gerente;
+  final Set<int> _sedes = {};
+  List<CandidatoCuenta>? _candidatos;
+  bool _guardando = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarCandidatos();
+  }
 
   @override
   void dispose() {
-    _nombre.dispose();
+    _buscar.dispose();
     _email.dispose();
-    _documento.dispose();
-    _clave.dispose();
+    _nombre.dispose();
     super.dispose();
   }
 
-  void _elegirRol(RolCuenta r) => setState(() {
-        _rol = r;
-        if (!r.conSedes) _sedes.clear();
-        if (r.unaSede && _sedes.length > 1) _sedes.removeAll(_sedes.skip(1).toList());
-        if (r.asistencia == null || r == RolCuenta.admin) _pausa = false;
-        _errorRol = null;
-      });
-
-  void _alternarSede(int id) => setState(() {
-        if (_rol?.unaSede ?? false) {
-          _sedes
-            ..clear()
-            ..add(id);
-        } else if (!_sedes.remove(id)) {
-          _sedes.add(id);
-        }
-        _errorRol = null;
-      });
-
-  /// Las mismas reglas que exigen los dos servidores.
-  String? _validarRol() {
-    final r = _rol;
-    if (r == null) return 'Elige un rol para la cuenta';
-    if (r.unaSede && _sedes.length != 1) return 'Vendedores y auxiliares pertenecen a exactamente una sede';
-    if (r == RolCuenta.gerente && _sedes.isEmpty) return 'Un gerente necesita al menos una sede';
-    return null;
+  Future<void> _cargarCandidatos() async {
+    try {
+      final l = await widget.api.candidatosCuenta(q: _buscar.text.trim());
+      if (mounted) setState(() => _candidatos = l);
+    } on ApiError catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+    }
   }
 
+  void _elegir(CandidatoCuenta c) => setState(() {
+        _empleado = c;
+        _email.text = c.email ?? '';
+        _sedes
+          ..clear()
+          ..add(c.sedeId);
+        _error = null;
+      });
+
+  bool get _pideSedes => !_tecnica && _rol == RolAsistencia.gerente && !(_empleado?.conCuenta ?? false);
+  bool get _pideCorreo => _tecnica || !(_empleado?.conCuenta ?? true);
+
   Future<void> _guardar() async {
-    final errorRol = _validarRol();
-    final valido = _form.currentState!.validate();
-    setState(() => _errorRol = errorRol);
-    if (!valido || errorRol != null) return;
-    final rol = _rol!;
+    // Un segundo toque mientras guarda no envía otra alta.
+    if (_guardando) return;
+    if (!_tecnica && _empleado == null) return setState(() => _error = 'Elige el empleado al que le das acceso');
+    if (!_form.currentState!.validate()) return;
+    if (_pideSedes && _sedes.isEmpty) return setState(() => _error = 'Un gerente necesita al menos una sede');
     setState(() {
       _guardando = true;
       _error = null;
     });
     try {
-      final guardado = await widget.api.guardarUsuario(
-        id: widget.usuario?.id,
-        nombre: _nombre.text.trim(),
-        email: _nuevo ? _email.text.trim().toLowerCase() : null,
-        password: _clave.text,
-        rolAsistencia: rol.asistencia,
-        rolInventario: rol.inventario,
-        sedes: rol.conSedes ? _sedes.toList() : const [],
-        documento: _documento.text.trim().isEmpty ? null : _documento.text.trim(),
-        activo: _nuevo ? null : _activo,
+      final r = await widget.api.crearCuenta(
+        rol: _tecnica ? RolAsistencia.operario : _rol,
+        empleadoId: _tecnica ? null : _empleado!.id,
+        sedes: _pideSedes ? _sedes.toList() : const [],
+        email: _pideCorreo ? _email.text.trim().toLowerCase() : null,
+        nombre: _tecnica ? _nombre.text.trim() : null,
       );
-      if (!_nuevo && rol.asistencia != null && _pausa != guardado.pausaAsistencia) {
-        await widget.api.pausarUsuario(guardado.id, pausada: _pausa);
-      }
+      if (!mounted) return;
+      avisar(
+        context,
+        r.cuentaExistente
+            ? '${r.usuario.nombre} ya entra a Presente con su cuenta de Ventario'
+            : r.avisoEnviado
+                ? 'Listo: le enviamos un correo para que cree su contraseña'
+                : 'Cuenta creada: que entre con «¿Olvidaste tu contraseña?» para crear la suya',
+      );
+      Navigator.pop(context, true);
+    } on ApiError catch (e) {
+      if (!mounted) return;
+      if (await manejarLimite(context, widget.api, e)) return;
+      setState(() => _error = e.mensaje);
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = context.sem;
+    final empleado = _empleado;
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(Espacio.lg, 0, Espacio.lg, Espacio.lg),
+        child: Form(
+          key: _form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Dar acceso a Presente', style: context.textos.headlineSmall),
+              const SizedBox(height: Espacio.md),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, icon: Icon(Icons.badge_outlined), label: Text('Un empleado')),
+                  ButtonSegment(value: true, icon: Icon(Icons.phone_android_rounded), label: Text('Operario')),
+                ],
+                selected: {_tecnica},
+                onSelectionChanged: (v) => setState(() {
+                  _tecnica = v.first;
+                  _error = null;
+                }),
+              ),
+              const SizedBox(height: Espacio.md),
+              if (_tecnica) ...[
+                Text(
+                  'Cuenta técnica para dejar los teléfonos de marcación listos: una para todas las sedes. '
+                  'No ocupa cupo de personas.',
+                  style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
+                ),
+                const SizedBox(height: Espacio.md),
+                TextFormField(
+                  controller: _nombre,
+                  decoration: const InputDecoration(labelText: 'Nombre', hintText: 'Operario · Sedes', prefixIcon: Icon(Icons.badge_outlined)),
+                  validator: (v) => (v ?? '').trim().length < 3 ? 'Ponle un nombre a la cuenta' : null,
+                ),
+                const SizedBox(height: Espacio.md),
+              ] else if (empleado == null) ...[
+                TextField(
+                  controller: _buscar,
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar por nombre o documento',
+                    prefixIcon: Icon(Icons.search_rounded),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => _cargarCandidatos(),
+                ),
+                const SizedBox(height: Espacio.sm),
+                if (_candidatos == null)
+                  const Padding(padding: EdgeInsets.all(Espacio.lg), child: Center(child: CircularProgressIndicator()))
+                else if (_candidatos!.isEmpty)
+                  Text(
+                    'No hay empleados sin acceso. Regístralo primero en «Personal» (con su correo) y vuelve aquí.',
+                    style: context.textos.bodyMedium?.copyWith(color: sem.textoSuave),
+                  )
+                else
+                  for (final c in _candidatos!.take(30))
+                    Card(
+                      margin: const EdgeInsets.only(bottom: Espacio.xs),
+                      child: ListTile(
+                        leading: AvatarEmpleado(nombre: c.nombre, tam: 40),
+                        title: Text(c.nombre),
+                        subtitle: Text([c.documento, c.sede, if (c.conCuenta) 'ya entra a Ventario'].join(' · ')),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => _elegir(c),
+                      ),
+                    ),
+              ] else ...[
+                Card(
+                  child: ListTile(
+                    leading: AvatarEmpleado(nombre: empleado.nombre, tam: 40),
+                    title: Text(empleado.nombre),
+                    subtitle: Text([empleado.documento, empleado.sede].join(' · ')),
+                    trailing: TextButton(onPressed: () => setState(() => _empleado = null), child: const Text('Cambiar')),
+                  ),
+                ),
+                if (empleado.conCuenta)
+                  Padding(
+                    padding: const EdgeInsets.only(top: Espacio.xs),
+                    child: Text(
+                      'Ya entra a Ventario: usará el mismo correo y contraseña.',
+                      style: context.textos.bodySmall?.copyWith(color: sem.entrada),
+                    ),
+                  ),
+                const SizedBox(height: Espacio.md),
+                Etiqueta('Rol en Presente'),
+                const SizedBox(height: Espacio.xs),
+                RadioGroup<RolAsistencia>(
+                  groupValue: _rol,
+                  onChanged: (r) => setState(() => _rol = r ?? _rol),
+                  child: Column(
+                    children: [
+                      for (final r in _rolesAsignables)
+                        RadioListTile<RolAsistencia>(
+                          value: r,
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          title: Text(r.etiqueta),
+                          subtitle: Text(r.descripcion),
+                        ),
+                    ],
+                  ),
+                ),
+                if (_pideSedes) ...[
+                  const SizedBox(height: Espacio.xs),
+                  Text('Sedes que gestiona', style: context.textos.titleSmall),
+                  const SizedBox(height: Espacio.xs),
+                  Wrap(
+                    spacing: Espacio.xs,
+                    runSpacing: Espacio.xs,
+                    children: [
+                      for (final s in widget.sedes)
+                        FilterChip(
+                          label: Text(s.nombre),
+                          selected: _sedes.contains(s.id),
+                          onSelected: (v) => setState(() => v ? _sedes.add(s.id) : _sedes.remove(s.id)),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: Espacio.md),
+              ],
+              if (_pideCorreo && (_tecnica || empleado != null))
+                TextFormField(
+                  controller: _email,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Correo',
+                    helperText: 'Con él entra. Le llegará un aviso para crear su contraseña.',
+                    helperMaxLines: 2,
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
+                  ),
+                  validator: (v) =>
+                      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch((v ?? '').trim()) ? null : 'Escribe un correo válido',
+                ),
+              if (_error != null) ...[
+                const SizedBox(height: Espacio.md),
+                MensajeError(_error!),
+              ],
+              if (_tecnica || empleado != null) ...[
+                const SizedBox(height: Espacio.lg),
+                FilledButton(
+                  onPressed: _guardando ? null : _guardar,
+                  child: _guardando
+                      ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
+                      : const Text('Dar acceso'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Cuenta existente ───────────────────────────────────────────────────────
+
+class _FormCuenta extends StatefulWidget {
+  const _FormCuenta({required this.api, required this.usuario, required this.sedes});
+  final Api api;
+  final Usuario usuario;
+  final List<Sede> sedes;
+
+  @override
+  State<_FormCuenta> createState() => _FormCuentaState();
+}
+
+class _FormCuentaState extends State<_FormCuenta> {
+  late RolAsistencia? _rol = widget.usuario.rolAsistencia;
+  late final Set<int> _sedes = {...widget.usuario.sedes};
+  late bool _activo = widget.usuario.activo;
+  late bool _pausa = widget.usuario.pausaAsistencia;
+  bool _guardando = false;
+  String? _error;
+
+  Usuario get u => widget.usuario;
+  bool get _esAdmin => u.rolAsistencia == RolAsistencia.admin;
+
+  /// Si también entra a Ventario, sus sedes se gestionan allá.
+  bool get _sedesAqui => _rol == RolAsistencia.gerente && !u.tieneVentario;
+
+  Future<void> _guardar() async {
+    if (_guardando) return;
+    if (_sedesAqui && _sedes.isEmpty) return setState(() => _error = 'Un gerente necesita al menos una sede');
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+    try {
+      await widget.api.actualizarCuenta(
+        u.id,
+        rol: _esAdmin || _rol == u.rolAsistencia ? null : _rol,
+        sedes: _sedesAqui ? _sedes.toList() : (_rol != RolAsistencia.gerente && !u.tieneVentario ? const [] : null),
+        activo: _activo == u.activo ? null : _activo,
+      );
+      if (_pausa != u.pausaAsistencia) await widget.api.pausarUsuario(u.id, pausada: _pausa);
       if (mounted) {
-        avisar(context, _nuevo ? 'Cuenta creada: ya puede entrar con su correo' : 'Cambios guardados');
+        avisar(context, 'Cambios guardados');
         Navigator.pop(context, true);
       }
     } on ApiError catch (e) {
@@ -288,111 +475,86 @@ class _FormUsuarioState extends State<_FormUsuario> {
     }
   }
 
-  Widget _titulo(String texto, IconData icono) => Padding(
-        padding: const EdgeInsets.only(top: Espacio.lg, bottom: Espacio.xs),
-        child: Row(
-          children: [
-            Icon(icono, size: 18, color: context.colores.primary),
-            const SizedBox(width: Espacio.xs),
-            Etiqueta(texto),
-          ],
+  Future<void> _quitar() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('¿Quitar el acceso a Presente de ${u.nombre}?'),
+        content: Text(
+          u.tieneVentario
+              ? 'Ya no podrá entrar a Presente. Su acceso a Ventario sigue igual.'
+              : 'Ya no podrá entrar a Presente. Si es un empleado, sigue registrado en «Personal» y puede marcar asistencia.',
         ),
-      );
-
-  String get _ayudaSedes => (_rol?.unaSede ?? false) ? 'Elige la sede donde trabaja.' : 'Elige una o varias sedes a su cargo.';
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: c.sem.peligro, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Quitar acceso'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _guardando = true);
+    try {
+      await widget.api.quitarAcceso(u.id);
+      if (mounted) {
+        avisar(context, 'Acceso a Presente retirado');
+        Navigator.pop(context, true);
+      }
+    } on ApiError catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final sem = context.sem;
-    final rol = _rol;
-    final grupos = <(String, IconData, List<RolCuenta>)>[
-      ('En las dos apps', Icons.apps_rounded, const [RolCuenta.admin, RolCuenta.gerente]),
-      if (widget.conInventario)
-        ('Solo Ventario', Icons.point_of_sale_outlined, const [RolCuenta.vendedor, RolCuenta.auxiliar]),
-      ('Solo Presente', Icons.face_unlock_outlined, const [RolCuenta.talentoHumano, RolCuenta.operario]),
-    ];
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(Espacio.lg, 0, Espacio.lg, Espacio.lg),
-        child: Form(
-          key: _form,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(_nuevo ? 'Nueva cuenta' : 'Editar cuenta', style: context.textos.headlineSmall),
-              const SizedBox(height: Espacio.md),
-              TextFormField(
-                controller: _nombre,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(labelText: 'Nombre completo', prefixIcon: Icon(Icons.badge_outlined)),
-                validator: (v) => (v ?? '').trim().length < 3 ? 'Escribe el nombre completo' : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(u.nombre, style: context.textos.headlineSmall),
+            Text(u.email, style: context.textos.bodyMedium?.copyWith(color: sem.textoSuave)),
+            if (u.tieneVentario)
+              Padding(
+                padding: const EdgeInsets.only(top: Espacio.xxs),
+                child: Text('También entra a Ventario (ese acceso se gestiona allá).',
+                    style: context.textos.bodySmall?.copyWith(color: sem.textoSuave)),
               ),
-              const SizedBox(height: Espacio.md),
-              TextFormField(
-                controller: _email,
-                enabled: _nuevo,
-                keyboardType: TextInputType.emailAddress,
-                autocorrect: false,
-                decoration: const InputDecoration(
-                  labelText: 'Correo',
-                  helperText: 'Con él entra a las apps. No se puede cambiar después.',
-                  prefixIcon: Icon(Icons.alternate_email_rounded),
-                ),
-                validator: (v) => !_nuevo || RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch((v ?? '').trim())
-                    ? null
-                    : 'Escribe un correo válido',
-              ),
-              const SizedBox(height: Espacio.md),
-              TextFormField(
-                controller: _documento,
-                decoration: const InputDecoration(
-                  labelText: 'Documento (opcional)',
-                  helperText: 'Si ya marca asistencia, el mismo documento une su ficha a esta cuenta.',
-                  helperMaxLines: 2,
-                  prefixIcon: Icon(Icons.credit_card_outlined),
-                ),
-                validator: (v) {
-                  final t = (v ?? '').trim();
-                  return t.isEmpty || RegExp(r'^[A-Za-z0-9.-]{3,20}$').hasMatch(t) ? null : 'De 3 a 20 letras o números';
-                },
-              ),
-              const SizedBox(height: Espacio.md),
-              TextFormField(
-                controller: _clave,
-                obscureText: _ocultar,
-                autofillHints: const [AutofillHints.newPassword],
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: _nuevo ? 'Contraseña' : 'Nueva contraseña (opcional)',
-                  prefixIcon: const Icon(Icons.lock_outline_rounded),
-                  suffixIcon: IconButton(
-                    tooltip: _ocultar ? 'Mostrar contraseña' : 'Ocultar contraseña',
-                    onPressed: () => setState(() => _ocultar = !_ocultar),
-                    icon: Icon(_ocultar ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                  ),
-                ),
-                validator: (v) {
-                  final p = v ?? '';
-                  if (_nuevo || p.isNotEmpty) return p.length < 8 ? 'Usa al menos 8 caracteres' : null;
-                  return null;
-                },
-              ),
+            const SizedBox(height: Espacio.md),
+            if (_esAdmin)
+              Text(
+                'Administrador de la empresa en las dos apps.',
+                style: context.textos.bodyMedium?.copyWith(color: sem.textoSuave),
+              )
+            else ...[
+              Etiqueta('Rol en Presente'),
               const SizedBox(height: Espacio.xs),
-              FortalezaClave(clave: _clave.text),
-
-              for (final (titulo, icono, roles) in grupos) ...[
-                _titulo(titulo, icono),
-                _Opciones<RolCuenta>(
-                  valor: rol,
-                  opciones: [for (final r in roles) (r, r.etiqueta, r.descripcion)],
-                  alElegir: _elegirRol,
+              RadioGroup<RolAsistencia>(
+                groupValue: _rol,
+                onChanged: (r) => setState(() => _rol = r ?? _rol),
+                child: Column(
+                  children: [
+                    for (final r in _rolesAsignables)
+                      RadioListTile<RolAsistencia>(
+                        value: r,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text(r.etiqueta),
+                        subtitle: Text(r.descripcion),
+                      ),
+                  ],
                 ),
-              ],
-
-              if (rol != null && rol.conSedes) ...[
-                _titulo('Sedes', Icons.place_outlined),
-                Text(_ayudaSedes, style: context.textos.bodySmall?.copyWith(color: sem.textoSuave)),
+              ),
+              if (_sedesAqui) ...[
+                Text('Sedes que gestiona', style: context.textos.titleSmall),
                 const SizedBox(height: Espacio.xs),
                 Wrap(
                   spacing: Espacio.xs,
@@ -402,114 +564,50 @@ class _FormUsuarioState extends State<_FormUsuario> {
                       FilterChip(
                         label: Text(s.nombre),
                         selected: _sedes.contains(s.id),
-                        onSelected: (_) => _alternarSede(s.id),
+                        onSelected: (v) => setState(() => v ? _sedes.add(s.id) : _sedes.remove(s.id)),
                       ),
                   ],
                 ),
-              ] else if (rol != null) ...[
-                const SizedBox(height: Espacio.sm),
-                Text(
-                  rol == RolCuenta.admin
-                      ? 'El administrador ve todas las sedes.'
-                      : 'Trabaja en todas las sedes de Presente: no se le asignan sedes.',
-                  style: context.textos.bodySmall?.copyWith(color: sem.textoSuave),
-                ),
-              ],
-              if (_errorRol != null) ...[
-                const SizedBox(height: Espacio.xs),
-                Text(_errorRol!, style: context.textos.bodySmall?.copyWith(color: sem.peligro)),
-              ],
-
-              if (!_nuevo) ...[
-                const SizedBox(height: Espacio.md),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _activo,
-                  onChanged: (v) => setState(() => _activo = v),
-                  title: const Text('Cuenta activa'),
-                  subtitle: const Text('Inactiva: no entra a ninguna app y libera su cupo del plan.'),
-                ),
-                if (rol?.asistencia != null && rol != RolCuenta.admin)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _pausa,
-                    onChanged: (v) => setState(() => _pausa = v),
-                    title: const Text('En pausa en Presente'),
-                    subtitle: const Text('No entra a Presente ni ocupa su cupo; en Ventario sigue igual.'),
-                  ),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: Espacio.md),
-                MensajeError(_error!),
-              ],
+              ] else if (_rol == RolAsistencia.gerente && u.tieneVentario)
+                Text('Sus sedes se asignan en Ventario.', style: context.textos.bodySmall?.copyWith(color: sem.textoSuave)),
+              const SizedBox(height: Espacio.sm),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _activo,
+                onChanged: (v) => setState(() => _activo = v),
+                title: const Text('Cuenta activa'),
+                subtitle: const Text('Inactiva: no entra a ninguna de las dos apps.'),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _pausa,
+                onChanged: (v) => setState(() => _pausa = v),
+                title: const Text('En pausa en Presente'),
+                subtitle: const Text('No entra a Presente ni ocupa su cupo; en Ventario sigue igual.'),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: Espacio.md),
+              MensajeError(_error!),
+            ],
+            if (!_esAdmin) ...[
               const SizedBox(height: Espacio.lg),
               FilledButton(
                 onPressed: _guardando ? null : _guardar,
                 child: _guardando
                     ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5))
-                    : Text(_nuevo ? 'Crear cuenta' : 'Guardar'),
+                    : const Text('Guardar'),
+              ),
+              const SizedBox(height: Espacio.xs),
+              TextButton.icon(
+                onPressed: _guardando ? null : _quitar,
+                icon: Icon(Icons.person_remove_outlined, color: sem.peligro),
+                label: Text('Quitar acceso a Presente', style: TextStyle(color: sem.peligro)),
               ),
             ],
-          ),
+          ],
         ),
       ),
-    );
-  }
-}
-
-/// Opciones excluyentes con título y explicación (más claras que un menú para
-/// decidir qué puede hacer alguien).
-class _Opciones<T> extends StatelessWidget {
-  const _Opciones({required this.valor, required this.opciones, required this.alElegir});
-  final T? valor;
-  final List<(T, String, String)> opciones;
-  final ValueChanged<T> alElegir;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colores;
-    return Column(
-      children: [
-        for (final (v, titulo, detalle) in opciones)
-          Padding(
-            padding: const EdgeInsets.only(bottom: Espacio.xxs),
-            child: Material(
-              color: v == valor ? c.primary.withValues(alpha: 0.08) : Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(Redondeo.md),
-                side: BorderSide(color: v == valor ? c.primary : c.outlineVariant, width: v == valor ? 1.5 : 1),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(Redondeo.md),
-                onTap: () => alElegir(v),
-                child: Semantics(
-                  selected: v == valor,
-                  inMutuallyExclusiveGroup: true,
-                  button: true,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: Espacio.sm, vertical: Espacio.xs),
-                    child: Row(
-                      children: [
-                        Icon(v == valor ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
-                            color: v == valor ? c.primary : context.sem.textoSuave, size: 22),
-                        const SizedBox(width: Espacio.sm),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(titulo, style: context.textos.titleSmall),
-                              Text(detalle, style: context.textos.bodySmall?.copyWith(color: context.sem.textoSuave)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
