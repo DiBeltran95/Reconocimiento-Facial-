@@ -29,6 +29,11 @@ class InicioPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final estado = context.watch<EstadoApp>();
+    // Teléfono personal con la sesión recordada: abre directo en el panel
+    // (como Ventario), también sin internet.
+    if (!estado.configurado && (estado.sesion.sesion?.esAdministrativo ?? false)) {
+      return const PanelPrincipal();
+    }
     return Theme(
       data: construirTema(Brightness.dark),
       child: estado.configurado
@@ -47,12 +52,13 @@ class InicioPage extends StatelessWidget {
   }
 }
 
-/// Inicia sesión y, si la cuenta administra, abre el panel.
+/// Inicia sesión. En un teléfono de marcación abre el panel encima; en un
+/// teléfono personal la pantalla inicial ya pasa sola al panel.
 Future<void> _iniciarSesion(BuildContext context) async {
   final alPanel = await Navigator.of(context).push<bool>(
     MaterialPageRoute(builder: (_) => const IniciarSesionPage()),
   );
-  if (alPanel == true && context.mounted) await abrirPanel(context);
+  if (alPanel == true && context.mounted && context.read<EstadoApp>().configurado) await abrirPanel(context);
 }
 
 Future<void> _crearCuenta(BuildContext context) async {
@@ -63,7 +69,7 @@ Future<void> _crearCuenta(BuildContext context) async {
   if (sesion == null || !context.mounted) return;
   estado.sesion.adoptar(sesion);
   avisar(context, '¡${sesion.empresa?.nombre ?? 'Tu empresa'} quedó creada!');
-  await abrirPanel(context);
+  if (estado.configurado) await abrirPanel(context);
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ use App\Controladores\DispositivosControlador as Dispositivos;
 use App\Controladores\EmpleadosControlador as Empleados;
 use App\Controladores\HorariosControlador as Horarios;
 use App\Controladores\KioscoControlador as Kiosco;
+use App\Controladores\NovedadesControlador as Novedades;
 use App\Controladores\PlataformaControlador as Plataforma;
 use App\Controladores\ReportesControlador as Reportes;
 use App\Controladores\SedesControlador as Sedes;
@@ -32,6 +33,7 @@ $r->post('/api/cuenta/restablecer', [Cuenta::class, 'restablecer']);
 
 // Cualquier persona autenticada (GENERAL o ADMINISTRATIVO)
 $r->get('/api/auth/yo', [Sistema::class, 'yo']);
+$r->post('/api/auth/renovar', [Sistema::class, 'renovar']);
 $r->get('/api/sedes', [Sistema::class, 'sedes']);
 $r->post('/api/dispositivos', [Dispositivos::class, 'crear']);
 $r->get('/api/cuenta/empresa', [Cuenta::class, 'empresa']);
@@ -82,6 +84,11 @@ $r->post('/api/usuarios', [Usuarios::class, 'crear']);
 $r->put('/api/usuarios/{id}', [Usuarios::class, 'actualizar']);
 $r->post('/api/usuarios/{id}/pausa', [Usuarios::class, 'pausar']);
 $r->delete('/api/usuarios/{id}', [Usuarios::class, 'quitar']);
+
+$r->get('/api/novedades', [Novedades::class, 'listar']);
+$r->post('/api/novedades/{id}/resolver', [Novedades::class, 'resolver']);
+$r->get('/api/novedades/{id}/soportes', [Novedades::class, 'soportes']);
+$r->get('/api/novedades/{id}/soportes/{sid}', [Novedades::class, 'soporte']);
 
 $r->get('/api/reportes/dia', [Reportes::class, 'dia']);
 $r->get('/api/reportes/dia.csv', [Reportes::class, 'diaCsv']);

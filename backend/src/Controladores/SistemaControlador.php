@@ -73,13 +73,7 @@ final class SistemaControlador
             }
         }
 
-        $token = Jwt::firmar([
-            'sub' => $persona['id'],
-            'emp' => $persona['empresa_id'],
-            'rol' => $persona['rol'],
-            'iat' => time(),
-            'exp' => time() + $ttl,
-        ], (string) Config::get('jwt_secret'));
+        [$token, $ttl] = self::emitirToken($persona, (bool) ($datos['recordar'] ?? false));
 
         Response::json([
             'token'     => $token,
@@ -87,6 +81,43 @@ final class SistemaControlador
             'usuario'   => self::usuarioJson($persona),
             'empresa'   => self::empresaJson($persona['empresa_id']),
             'negocio'   => self::nombreNegocio($persona['empresa_id']),
+        ]);
+    }
+
+    /**
+     * Sesión de la persona. La app del teléfono pide `recordar`: dura
+     * `jwt_ttl_app` (30 días por defecto) y se renueva sola con `renovar`
+     * cada vez que hay internet, así no se cierra al salir de la app ni sin
+     * conexión. No pierde seguridad: cada petición vuelve a validar la cuenta,
+     * y si la inactivan la sesión muere ya. El panel web usa `jwt_ttl` (12 h).
+     * @return array{0:string, 1:int}  [token, segundos de vigencia]
+     */
+    public static function emitirToken(array $persona, bool $recordar): array
+    {
+        $ttl = $recordar
+            ? (int) Config::get('jwt_ttl_app', 30 * 86400)
+            : (int) Config::get('jwt_ttl', 43200);
+        $token = Jwt::firmar([
+            'sub' => $persona['id'],
+            'emp' => $persona['empresa_id'],
+            'rol' => $persona['rol'],
+            'rec' => $recordar ? 1 : 0,
+            'iat' => time(),
+            'exp' => time() + $ttl,
+        ], (string) Config::get('jwt_secret'));
+        return [$token, $ttl];
+    }
+
+    /** La app renueva su sesión recordada (con la sesión aún vigente). */
+    public static function renovar(Request $req): never
+    {
+        $persona = Auth::persona($req);
+        [$token, $ttl] = self::emitirToken($persona, true);
+        Response::json([
+            'token'     => $token,
+            'expira_en' => $ttl,
+            'usuario'   => self::usuarioJson($persona),
+            'empresa'   => self::empresaJson($persona['empresa_id']),
         ]);
     }
 

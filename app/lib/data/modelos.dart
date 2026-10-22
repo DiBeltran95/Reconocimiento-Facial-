@@ -344,6 +344,34 @@ class SesionAdmin {
 
   bool get vigente => DateTime.now().isBefore(expira);
 
+  /// Para guardarla en el teléfono (almacenamiento seguro) y no pedir entrar
+  /// cada vez que se abre la app.
+  Map<String, dynamic> aJson() => {
+        'token': token,
+        'nombre': nombre,
+        'email': email,
+        'rol': rol.api,
+        'rol_asistencia': rolAsistencia?.api,
+        'empresa': empresa == null ? null : {'uuid': empresa!.uuid, 'nombre': empresa!.nombre},
+        'expira': expira.toIso8601String(),
+      };
+
+  static SesionAdmin? desdeJson(Map<String, dynamic> j) {
+    try {
+      return SesionAdmin(
+        token: j['token'] as String,
+        nombre: j['nombre'] as String,
+        email: (j['email'] as String?) ?? '',
+        rol: Rol.desdeApi(j['rol'] as String?),
+        rolAsistencia: RolAsistencia.desdeApi(j['rol_asistencia'] as String?),
+        empresa: EmpresaRef.desdeJson(j['empresa'] as Map<String, dynamic>?),
+        expira: DateTime.parse(j['expira'] as String),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Entra al panel: administrador, gerente o talento humano.
   bool get esAdministrativo => rol == Rol.administrativo && !esOperario;
 
@@ -1097,4 +1125,148 @@ class VectorRostro {
   const VectorRostro(this.empleadoId, this.valores);
   final int empleadoId;
   final Float32List valores;
+}
+
+// ---------------------------------------------------------------------------
+// Novedades (permisos, incapacidades…): las envía el empleado por WhatsApp
+// ---------------------------------------------------------------------------
+
+enum TipoNovedad {
+  permiso('PERMISO', 'Permiso'),
+  incapacidad('INCAPACIDAD', 'Incapacidad médica'),
+  citaMedica('CITA_MEDICA', 'Cita médica'),
+  calamidad('CALAMIDAD', 'Calamidad doméstica'),
+  vacaciones('VACACIONES', 'Vacaciones'),
+  licencia('LICENCIA', 'Licencia'),
+  otro('OTRO', 'Otra novedad');
+
+  const TipoNovedad(this.api, this.etiqueta);
+  final String api;
+  final String etiqueta;
+
+  static TipoNovedad desdeApi(String? v) => values.where((t) => t.api == v).firstOrNull ?? otro;
+}
+
+enum EstadoNovedad {
+  pendiente('PENDIENTE', 'Pendiente'),
+  aprobada('APROBADA', 'Aprobada'),
+  rechazada('RECHAZADA', 'Rechazada'),
+  anulada('ANULADA', 'Anulada');
+
+  const EstadoNovedad(this.api, this.etiqueta);
+  final String api;
+  final String etiqueta;
+
+  static EstadoNovedad desdeApi(String? v) => values.where((e) => e.api == v).firstOrNull ?? pendiente;
+}
+
+class Novedad {
+  const Novedad({
+    required this.id,
+    required this.tipo,
+    required this.estado,
+    required this.desde,
+    required this.hasta,
+    required this.empleadoId,
+    required this.empleado,
+    required this.documento,
+    required this.sedeId,
+    required this.sede,
+    this.horaDesde,
+    this.horaHasta,
+    this.cargo,
+    this.motivo,
+    this.comentario,
+    this.soportes = 0,
+    this.canal = 'WHATSAPP',
+    this.resueltoPor,
+    this.resueltoEn,
+    this.creada,
+  });
+
+  final int id;
+  final TipoNovedad tipo;
+  final EstadoNovedad estado;
+
+  /// Días (fecha local de la empresa, sin hora).
+  final DateTime desde;
+  final DateTime hasta;
+
+  /// «08:00»; solo en un permiso por horas (dentro de [desde]).
+  final String? horaDesde;
+  final String? horaHasta;
+  final int empleadoId;
+  final String empleado;
+  final String documento;
+  final String? cargo;
+  final int sedeId;
+  final String sede;
+  final String? motivo;
+  final String? comentario;
+  final int soportes;
+  final String canal;
+  final String? resueltoPor;
+  final DateTime? resueltoEn;
+  final DateTime? creada;
+
+  bool get pendiente => estado == EstadoNovedad.pendiente;
+  bool get porHoras => horaDesde != null;
+
+  /// Días que cubre (1 en un permiso por horas).
+  int get dias => hasta.difference(desde).inDays + 1;
+
+  factory Novedad.desdeJson(Map<String, dynamic> j) {
+    final e = j['empleado'] as Map<String, dynamic>;
+    final s = j['sede'] as Map<String, dynamic>;
+    DateTime? fecha(Object? v) => v == null ? null : DateTime.parse(v as String);
+    return Novedad(
+      id: (j['id'] as num).toInt(),
+      tipo: TipoNovedad.desdeApi(j['tipo'] as String?),
+      estado: EstadoNovedad.desdeApi(j['estado'] as String?),
+      desde: DateTime.parse(j['fecha_desde'] as String),
+      hasta: DateTime.parse(j['fecha_hasta'] as String),
+      horaDesde: j['hora_desde'] as String?,
+      horaHasta: j['hora_hasta'] as String?,
+      motivo: j['motivo'] as String?,
+      comentario: j['comentario'] as String?,
+      soportes: ((j['soportes'] as num?) ?? 0).toInt(),
+      canal: (j['canal'] as String?) ?? 'WHATSAPP',
+      empleadoId: (e['id'] as num).toInt(),
+      empleado: e['nombre'] as String,
+      documento: (e['documento'] ?? '') as String,
+      cargo: e['cargo'] as String?,
+      sedeId: (s['id'] as num).toInt(),
+      sede: s['nombre'] as String,
+      resueltoPor: j['resuelto_por'] as String?,
+      resueltoEn: fecha(j['resuelto_en']),
+      creada: fecha(j['creada']),
+    );
+  }
+}
+
+class SoporteNovedad {
+  const SoporteNovedad({required this.id, required this.nombre, required this.mime, required this.tamano});
+  final int id;
+  final String nombre;
+  final String mime;
+  final int tamano;
+
+  bool get esImagen => mime.startsWith('image/');
+  bool get esPdf => mime == 'application/pdf';
+
+  factory SoporteNovedad.desdeJson(Map<String, dynamic> j) => SoporteNovedad(
+        id: (j['id'] as num).toInt(),
+        nombre: j['nombre'] as String,
+        mime: j['mime'] as String,
+        tamano: (j['tamano'] as num).toInt(),
+      );
+}
+
+/// Bandeja de novedades: la lista, cuántas esperan respuesta y si la cuenta
+/// puede abrir los soportes (datos de salud: administrador y talento humano).
+class BandejaNovedades {
+  const BandejaNovedades({required this.novedades, required this.pendientes, required this.veSoportes});
+  final List<Novedad> novedades;
+  final int pendientes;
+  final bool veSoportes;
 }

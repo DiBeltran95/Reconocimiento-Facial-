@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <!-- open_filex las pide, pero aquí solo abre el PDF de un soporte desde la
+         carpeta temporal de la app (no lee la galería). Sin ellas no hay que
+         declarar «permisos de fotos y videos» en Play Store. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove" />
     <uses-feature android:name="android.hardware.camera.front" android:required="true" />
 
     <application

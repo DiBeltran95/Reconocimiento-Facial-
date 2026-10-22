@@ -146,13 +146,23 @@ class Api {
   /// Correo y contraseña de la cuenta de la plataforma: la misma con la que la
   /// persona entra a Inventario. (Las cuentas migradas de la versión anterior
   /// pueden seguir usando su nombre de usuario.)
-  Future<SesionAdmin> login(String email, String password) async {
-    final j = await _post('/api/auth/login', {'email': email, 'password': password}) as Map<String, dynamic>;
+  /// [recordar]: sesión larga de la app (30 días, se renueva sola), para no
+  /// pedir entrar cada vez que se abre ni cerrarla sin conexión.
+  Future<SesionAdmin> login(String email, String password, {bool recordar = false}) async {
+    final j = await _post('/api/auth/login', {
+      'email': email,
+      'password': password,
+      if (recordar) 'recordar': true,
+    }) as Map<String, dynamic>;
     if (j['superadmin'] == true) {
       throw const ApiError(403, 'Esta cuenta es del equipo de la plataforma: entra desde el panel web.');
     }
     return _sesionDesde(j);
   }
+
+  /// Renueva la sesión recordada mientras sigue vigente (cuando hay internet).
+  Future<SesionAdmin> renovarSesion() async =>
+      _sesionDesde(await _post('/api/auth/renovar', const {}, admin: true) as Map<String, dynamic>);
 
   SesionAdmin _sesionDesde(Map<String, dynamic> j) {
     final u = j['usuario'] as Map<String, dynamic>;
@@ -188,6 +198,7 @@ class Api {
       'sede': {'nombre': sede},
       'usuario': {'nombre': nombre, 'email': email, 'password': password},
       'acepta_terminos': true,
+      'recordar': true,
     }) as Map<String, dynamic>;
     return _sesionDesde(j);
   }
@@ -288,6 +299,52 @@ class Api {
   Future<Empleado> pausarEmpleado(int id, {required bool pausada}) async {
     final j = await _post('/api/empleados/$id/pausa', {'pausada': pausada}, admin: true) as Map<String, dynamic>;
     return Empleado.desdeJson(j['empleado'] as Map<String, dynamic>);
+  }
+
+  // ---------------------------------------------------------------- Novedades
+
+  /// Pendientes (las más antiguas primero) o las ya resueltas (recientes).
+  Future<BandejaNovedades> novedades({bool pendientes = true}) async {
+    final j = await _get('/api/novedades', query: {'estado': pendientes ? 'PENDIENTE' : 'RESUELTAS'}, admin: true)
+        as Map<String, dynamic>;
+    return BandejaNovedades(
+      novedades: (j['novedades'] as List).map((n) => Novedad.desdeJson(n as Map<String, dynamic>)).toList(),
+      pendientes: ((j['pendientes'] as num?) ?? 0).toInt(),
+      veSoportes: j['ve_soportes'] as bool? ?? false,
+    );
+  }
+
+  /// Aprueba o rechaza; el servidor le avisa al empleado por WhatsApp
+  /// ([avisado] = false si no se pudo enviar el mensaje).
+  Future<({Novedad novedad, bool avisado})> resolverNovedad(int id, {required bool aprobar, String? comentario}) async {
+    final j = await _post(
+      '/api/novedades/$id/resolver',
+      {'estado': aprobar ? 'APROBADA' : 'RECHAZADA', 'comentario': ?comentario},
+      admin: true,
+    ) as Map<String, dynamic>;
+    return (
+      novedad: Novedad.desdeJson(j['novedad'] as Map<String, dynamic>),
+      avisado: j['avisado'] as bool? ?? false,
+    );
+  }
+
+  Future<List<SoporteNovedad>> soportesNovedad(int id) async {
+    final j = await _get('/api/novedades/$id/soportes', admin: true) as Map<String, dynamic>;
+    return (j['soportes'] as List).map((s) => SoporteNovedad.desdeJson(s as Map<String, dynamic>)).toList();
+  }
+
+  /// URL + cabeceras para mostrar un soporte de imagen con Image.network.
+  ({String url, Map<String, String> cabeceras}) soporteNovedad(int novedadId, int soporteId) => (
+        url: uri('/api/novedades/$novedadId/soportes/$soporteId').toString(),
+        cabeceras: cabeceras(admin: true, json: false),
+      );
+
+  Future<Uint8List> descargarSoporte(int novedadId, int soporteId) async {
+    final r = await _enviar(
+      () => _http.get(uri('/api/novedades/$novedadId/soportes/$soporteId'), headers: cabeceras(admin: true, json: false)),
+    );
+    if (r.statusCode != 200) _procesar(r);
+    return r.bodyBytes;
   }
 
   Future<Usuario> pausarUsuario(int id, {required bool pausada}) async {

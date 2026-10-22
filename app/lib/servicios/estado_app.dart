@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/almacen_local.dart';
@@ -19,6 +21,8 @@ import 'sincronizador.dart';
 class EstadoApp extends ChangeNotifier {
   EstadoApp._(this.almacen, this.ajustes, this.motor, this.errorMotor, this.api) {
     sesion.api = api;
+    // Abrir o cerrar sesión cambia lo que muestra la pantalla inicial.
+    sesion.addListener(notifyListeners);
   }
 
   final AlmacenLocal almacen;
@@ -57,6 +61,11 @@ class EstadoApp extends ChangeNotifier {
     final url = config?.url ?? await ConfigDispositivo.ultimaUrl() ?? Api.urlPorDefecto;
     final estado = EstadoApp._(almacen, ajustes, motor, error, Api(baseUrl: url));
     if (config != null) await estado._activar(config);
+    // En el teléfono personal la sesión se recuerda (también sin internet) y
+    // se renueva sola; en un teléfono de marcación no se guarda.
+    estado.sesion.recordada = config == null;
+    await estado.sesion.restaurar();
+    unawaited(estado.sesion.renovar());
     return estado;
   }
 
@@ -80,6 +89,8 @@ class EstadoApp extends ChangeNotifier {
     await nueva.guardar();
     await ConfigDispositivo.recordarUrl(nueva.url);
     avisoDesvinculado = null;
+    // Ahora es un teléfono público: la sesión deja de recordarse.
+    sesion.recordada = false;
     await _activar(nueva);
     notifyListeners();
   }
@@ -121,6 +132,7 @@ class EstadoApp extends ChangeNotifier {
       } catch (_) {}
     }
     sesion.cerrar();
+    sesion.recordada = true;
     sincronizador?.dispose();
     sincronizador = null;
     asistencia = null;

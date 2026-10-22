@@ -76,11 +76,7 @@ final class CuentaControlador
 
         // Recién creada, la sesión se abre de una vez.
         $persona = Auth::autenticar($email, $password);
-        $ttl = (int) Config::get('jwt_ttl', 43200);
-        $token = Jwt::firmar([
-            'sub' => $persona['id'], 'emp' => $persona['empresa_id'], 'rol' => $persona['rol'],
-            'iat' => time(), 'exp' => time() + $ttl,
-        ], (string) Config::get('jwt_secret'));
+        [$token, $ttl] = SistemaControlador::emitirToken($persona, (bool) ($req->json()['recordar'] ?? false));
 
         Response::json([
             'token'     => $token,

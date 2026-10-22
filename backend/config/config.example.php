@@ -15,7 +15,8 @@ return [
     // Secreto para firmar las sesiones de administración (JWT HS256).
     // Genera uno con:  php -r "echo bin2hex(random_bytes(32));"
     'jwt_secret' => 'CAMBIAR-por-64-caracteres-aleatorios',
-    'jwt_ttl'    => 12 * 3600, // segundos
+    'jwt_ttl'    => 12 * 3600, // segundos (panel web)
+    'jwt_ttl_app' => 30 * 86400, // sesión recordada de la app del teléfono; se renueva sola
 
     // Nombre de la plataforma (lo devuelve /api/salud).
     'nombre_plataforma' => 'Krenovapp',
@@ -35,6 +36,15 @@ return [
             'usuario' => 'tu-cuenta@gmail.com',
             'clave'   => 'CONTRASEÑA-DE-APLICACIÓN',
         ],
+    ],
+
+    // Aviso por WhatsApp al empleado cuando se aprueba o rechaza su novedad
+    // (API de apiwhatsapp: POST {jid, text} con la cabecera x-api-key). Sin
+    // url o api_key no se avisa, pero la novedad se resuelve igual.
+    'whatsapp' => [
+        'url'        => 'https://TU_API_WHATSAPP/api/messages/text',
+        'api_key'    => 'CAMBIAR',
+        'indicativo' => '57', // se antepone a los celulares de 10 dígitos
     ],
 
     // Carpeta privada donde se guardan las fotos de los rostros.
