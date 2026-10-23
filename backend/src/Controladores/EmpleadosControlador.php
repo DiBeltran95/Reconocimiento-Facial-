@@ -17,21 +17,22 @@ use App\Servicios\Tiempo;
  *
  * Plataforma multiempresa: todo se acota a la empresa y a las sedes del
  * administrativo (las del gerente, o todas las de la empresa para el ADMIN).
- * El empleado es UNO para las dos apps: se registra aquí o en Ventario (con
- * documento, teléfono y correo) y aparece en las dos. Puede estar LIGADO a una
- * cuenta de acceso (`usuario_id`) de Presente, de Ventario o de ambas; cuenta
- * una sola vez en el cupo del plan y, si su cuenta se inactiva, deja de poder
- * marcar.
+ * El empleado (`empleados`) es la PERSONA, una sola vez para las dos apps:
+ * nombre, documento, correo, teléfono, cargo y sede viven SOLO aquí. Se
+ * registra aquí o en Ventario y aparece en las dos. Puede tener una cuenta de
+ * acceso (`usuarios.empleado_id`) de Presente, de Ventario o de ambas, que
+ * entra con SU correo; cuenta una vez en el cupo del plan y, si su cuenta se
+ * inactiva, deja de poder marcar.
  */
 final class EmpleadosControlador
 {
-    /** Un empleado ligado solo está activo si su cuenta también lo está. */
-    private const SELECT = "SELECT e.id, e.empresa_id, e.sede_id, e.usuario_id, e.documento, e.nombre, e.cargo,
-                                   e.telefono, e.email, e.activo, e.en_pausa, e.consentimiento_en, u.email AS cuenta_email,
+    /** Un empleado con cuenta solo está activo si su cuenta también lo está. */
+    private const SELECT = "SELECT e.id, e.empresa_id, e.sede_id, u.id AS usuario_id, e.documento, e.nombre, e.cargo,
+                                   e.telefono, e.email, e.activo, e.en_pausa, e.consentimiento_en,
                                    u.rol AS cuenta_rol, u.rol_asistencia AS cuenta_rol_asistencia,
-                                   (e.usuario_id IS NOT NULL AND (u.activo <> 1 OR u.deleted_at IS NOT NULL)) AS cuenta_inactiva
-                              FROM asis_empleados e
-                              LEFT JOIN usuarios u ON u.id = e.usuario_id";
+                                   (u.id IS NOT NULL AND u.activo <> 1) AS cuenta_inactiva
+                              FROM empleados e
+                              LEFT JOIN usuarios u ON u.empleado_id = e.id AND u.deleted_at IS NULL";
 
     public static function listar(Request $req): never
     {
@@ -83,25 +84,28 @@ final class EmpleadosControlador
         $consiente = ($req->json()['consentimiento'] ?? false) === true;
 
         $existente = Db::fila(
-            'SELECT id, nombre, activo, sede_id FROM asis_empleados WHERE empresa_id = ? AND documento = ?',
+            'SELECT id, nombre, activo, sede_id FROM empleados WHERE empresa_id = ? AND documento = ?',
             [$admin['empresa_id'], $d['documento']],
         );
         if ($existente !== null && (int) $existente['activo'] === 1) {
             throw new HttpError(409, "Ya existe un empleado con ese documento: {$existente['nombre']}", ['campo' => 'documento']);
+        }
+        if ($d['email'] !== null) {
+            self::exigirCorreoLibre($d['email'], $existente === null ? null : (int) $existente['id']);
         }
 
         if ($existente !== null) {
             // Reingreso: se reactiva el mismo registro y conserva su historial.
             // El cupo del plan lo exige la base (LIMITE_PLAN → 409).
             Db::query(
-                'UPDATE asis_empleados SET sede_id = ?, nombre = ?, cargo = ?, telefono = ?, email = ?, activo = 1 WHERE id = ?',
+                'UPDATE empleados SET sede_id = ?, nombre = ?, cargo = ?, telefono = ?, email = ?, activo = 1 WHERE id = ?',
                 [$d['sede_id'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email'], $existente['id']],
             );
             $id = (int) $existente['id'];
             $estado = 200;
         } else {
             Db::query(
-                'INSERT INTO asis_empleados (empresa_id, sede_id, documento, nombre, cargo, telefono, email)
+                'INSERT INTO empleados (empresa_id, sede_id, documento, nombre, cargo, telefono, email)
                  VALUES (?, ?, ?, ?, ?, ?, ?)',
                 [$admin['empresa_id'], $d['sede_id'], $d['documento'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email']],
             );
@@ -131,28 +135,33 @@ final class EmpleadosControlador
             'cargo'     => $actual['cargo'],
             'telefono'  => $actual['telefono'],
             'email'     => $actual['email'],
-        ], $admin['empresa_id']);
+        ], $admin['empresa_id'], $actual['documento'] !== null);
         Auth::exigirSede($admin, $d['sede_id']);
 
-        $duplicado = Db::valor(
-            'SELECT nombre FROM asis_empleados WHERE empresa_id = ? AND documento = ? AND id <> ?',
-            [$admin['empresa_id'], $d['documento'], $actual['id']],
-        );
-        if ($duplicado !== null) {
-            throw new HttpError(409, "Ese documento ya pertenece a: $duplicado", ['campo' => 'documento']);
+        if ($d['documento'] !== null) {
+            $duplicado = Db::valor(
+                'SELECT nombre FROM empleados WHERE empresa_id = ? AND documento = ? AND id <> ?',
+                [$admin['empresa_id'], $d['documento'], $actual['id']],
+            );
+            if ($duplicado !== null) {
+                throw new HttpError(409, "Ese documento ya pertenece a: $duplicado", ['campo' => 'documento']);
+            }
+        }
+        if ($d['email'] !== $actual['email']) {
+            if ($d['email'] === null && $actual['usuario_id'] !== null) {
+                // Con cuenta, el correo es con el que entra: no puede quedar vacío.
+                throw HttpError::validacion('Con este correo entra a las apps: no puede quedar vacío', 'email');
+            }
+            if ($d['email'] !== null) {
+                self::exigirCorreoLibre($d['email'], (int) $actual['id']);
+            }
         }
 
+        // Sus datos viven solo aquí: la cuenta (si tiene) los lee de este registro.
         Db::query(
-            'UPDATE asis_empleados SET sede_id = ?, documento = ?, nombre = ?, cargo = ?, telefono = ?, email = ? WHERE id = ?',
+            'UPDATE empleados SET sede_id = ?, documento = ?, nombre = ?, cargo = ?, telefono = ?, email = ? WHERE id = ?',
             [$d['sede_id'], $d['documento'], $d['nombre'], $d['cargo'], $d['telefono'], $d['email'], $actual['id']],
         );
-        if ($actual['usuario_id'] !== null) {
-            // Es la misma persona en su cuenta (el correo de entrada no se toca).
-            Db::query(
-                'UPDATE usuarios SET nombre = ?, documento = ?, telefono = ? WHERE id = ? AND empresa_id = ?',
-                [$d['nombre'], $d['documento'], $d['telefono'], $actual['usuario_id'], $admin['empresa_id']],
-            );
-        }
         if (($req->json()['consentimiento'] ?? false) === true && $actual['consentimiento_en'] === null) {
             self::registrarConsentimiento((int) $actual['id'], $admin['id']);
         }
@@ -170,7 +179,10 @@ final class EmpleadosControlador
         $empleado = self::buscar($req->param('id'), $admin['empresa_id']);
         Auth::exigirSede($admin, (int) $empleado['sede_id']);
         $pausada = (bool) ($req->json()['pausada'] ?? true);
-        Db::query('UPDATE asis_empleados SET en_pausa = ? WHERE id = ?', [$pausada ? 1 : 0, $empleado['id']]);
+        if ($pausada && $empleado['cuenta_rol_asistencia'] === Auth::ROL_ADMIN) {
+            throw HttpError::validacion('Al administrador no se le pausa');
+        }
+        Db::query('UPDATE empleados SET en_pausa = ? WHERE id = ?', [$pausada ? 1 : 0, $empleado['id']]);
         Response::json(['empleado' => self::aJson(self::buscar((int) $empleado['id'], $admin['empresa_id']))]);
     }
 
@@ -180,8 +192,12 @@ final class EmpleadosControlador
         $admin = Auth::admin($req);
         $empleado = self::buscar($req->param('id'), $admin['empresa_id']);
         Auth::exigirSede($admin, (int) $empleado['sede_id']);
+        if ($empleado['cuenta_rol_asistencia'] === Auth::ROL_ADMIN || $empleado['cuenta_rol'] === 'ADMIN') {
+            throw HttpError::validacion('El administrador de la empresa no se da de baja');
+        }
 
-        Db::query('UPDATE asis_empleados SET activo = 0 WHERE id = ?', [$empleado['id']]);
+        // Sin empleado activo, su cuenta (si tiene) tampoco entra a las apps.
+        Db::query('UPDATE empleados SET activo = 0 WHERE id = ?', [$empleado['id']]);
         Fotos::borrarTodas((int) $empleado['id']);
         Response::sinContenido();
     }
@@ -269,10 +285,10 @@ final class EmpleadosControlador
             'activo'            => (int) $e['activo'] === 1,
             // En pausa por el plan: no ocupa cupo ni puede marcar hasta reactivarla.
             'en_pausa'          => (int) ($e['en_pausa'] ?? 0) === 1,
-            // Ligado a una cuenta: entra también a las apps con ese correo.
+            // Con cuenta: entra a las apps con SU correo.
             'cuenta'            => isset($e['usuario_id']) && $e['usuario_id'] !== null
                 ? [
-                    'email'          => $e['cuenta_email'],
+                    'email'          => $e['email'],
                     'activa'         => !(bool) $e['cuenta_inactiva'],
                     'rol_asistencia' => $e['cuenta_rol_asistencia'] ?? null,
                     'rol_inventario' => $e['cuenta_rol'] ?? null,
@@ -297,7 +313,7 @@ final class EmpleadosControlador
     private static function registrarConsentimiento(int $empleadoId, int $usuarioId): void
     {
         Db::query(
-            'UPDATE asis_empleados SET consentimiento_en = UTC_TIMESTAMP(), consentimiento_por = ? WHERE id = ?',
+            'UPDATE empleados SET consentimiento_en = UTC_TIMESTAMP(), consentimiento_por = ? WHERE id = ?',
             [$usuarioId, $empleadoId],
         );
     }
@@ -305,14 +321,37 @@ final class EmpleadosControlador
     /** Cambiar `updated_at` avisa a los kioscos que deben volver a sincronizarlo. */
     private static function marcarCambio(int $id): void
     {
-        Db::query('UPDATE asis_empleados SET updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?', [$id]);
+        Db::query('UPDATE empleados SET updated_at = CURRENT_TIMESTAMP(3) WHERE id = ?', [$id]);
     }
 
-    /** @return array{sede_id:int, documento:string, nombre:string, cargo:?string, telefono:?string, email:?string} */
-    private static function validar(array $datos, int $empresaId): array
+    /**
+     * El correo es con lo que se entra a la plataforma: no puede tenerlo otra
+     * persona (de esta u otra empresa) ni una cuenta técnica. La base lo exige
+     * igual (uk_empleados_email, EMAIL_EN_USO); aquí se explica mejor.
+     */
+    private static function exigirCorreoLibre(string $email, ?int $empleadoId): void
+    {
+        $otro = Db::valor(
+            'SELECT 1 FROM empleados WHERE email = ? AND id <> COALESCE(?, 0)
+             UNION ALL SELECT 1 FROM usuarios WHERE email = ? LIMIT 1',
+            [$email, $empleadoId, $email],
+        );
+        if ($otro !== null) {
+            throw new HttpError(409, 'Ese correo ya lo usa otra persona', ['campo' => 'email', 'codigo' => 'EMAIL_EN_USO']);
+        }
+    }
+
+    /**
+     * @param bool $exigirDocumento false solo al editar a quien aún no tiene
+     *   documento (p. ej. el dueño, creado al registrar la empresa).
+     * @return array{sede_id:int, documento:?string, nombre:string, cargo:?string, telefono:?string, email:?string}
+     */
+    private static function validar(array $datos, int $empresaId, bool $exigirDocumento = true): array
     {
         $documento = preg_replace('/[\s.]/', '', (string) ($datos['documento'] ?? ''));
-        if (!preg_match('/^[A-Za-z0-9-]{3,20}$/', $documento)) {
+        if ($documento === '' && !$exigirDocumento) {
+            $documento = null;
+        } elseif (!preg_match('/^[A-Za-z0-9-]{3,20}$/', $documento)) {
             throw HttpError::validacion('Documento inválido: 3 a 20 letras o números, sin puntos', 'documento');
         }
 
@@ -346,7 +385,7 @@ final class EmpleadosControlador
 
         return [
             'sede_id'   => $sedeId,
-            'documento' => strtoupper($documento),
+            'documento' => $documento === null ? null : strtoupper($documento),
             'nombre'    => $nombre,
             'cargo'     => $cargo === '' ? null : $cargo,
             'telefono'  => $telefono === '' ? null : $telefono,

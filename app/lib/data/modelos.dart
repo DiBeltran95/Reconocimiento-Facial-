@@ -165,7 +165,7 @@ class Empleado {
     return Empleado(
       id: (j['id'] as num).toInt(),
       sedeId: (j['sede_id'] as num).toInt(),
-      documento: j['documento'] as String,
+      documento: (j['documento'] as String?) ?? '',
       nombre: j['nombre'] as String,
       cargo: j['cargo'] as String?,
       activo: j['activo'] as bool? ?? true,
@@ -255,7 +255,7 @@ class EmpleadoRemoto {
 
   factory EmpleadoRemoto.desdeJson(Map<String, dynamic> j) => EmpleadoRemoto(
         id: (j['id'] as num).toInt(),
-        documento: j['documento'] as String,
+        documento: (j['documento'] as String?) ?? '',
         nombre: j['nombre'] as String,
         cargo: j['cargo'] as String?,
         fotos: ((j['fotos'] as List?) ?? const [])
@@ -589,7 +589,7 @@ class CandidatoCuenta {
 
   factory CandidatoCuenta.desdeJson(Map<String, dynamic> j) => CandidatoCuenta(
         id: (j['id'] as num).toInt(),
-        documento: j['documento'] as String,
+        documento: (j['documento'] as String?) ?? '',
         nombre: j['nombre'] as String,
         sedeId: (j['sede_id'] as num).toInt(),
         sede: j['sede'] as String,
@@ -890,7 +890,7 @@ class FilaCumplimiento {
     int n(String k) => (j[k] as num?)?.toInt() ?? 0;
     return FilaCumplimiento(
       id: n('id'),
-      documento: j['documento'] as String,
+      documento: (j['documento'] as String?) ?? '',
       nombre: j['nombre'] as String,
       cargo: j['cargo'] as String?,
       porcentaje: (j['porcentaje'] as num?)?.toInt(),
@@ -1047,7 +1047,7 @@ class FilaReporte {
     DateTime? f(String k) => j[k] == null ? null : DateTime.parse(j[k] as String);
     return FilaReporte(
       id: (j['id'] as num).toInt(),
-      documento: j['documento'] as String,
+      documento: (j['documento'] as String?) ?? '',
       nombre: j['nombre'] as String,
       cargo: j['cargo'] as String?,
       estado: EstadoAsistencia.desdeApi(j['estado'] as String),

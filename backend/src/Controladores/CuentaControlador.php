@@ -134,7 +134,13 @@ final class CuentaControlador
         LimiteIntentos::verificar($limite);
         LimiteIntentos::fallo($limite);
 
-        $u = Db::fila('SELECT id, nombre FROM usuarios WHERE email = ? AND activo = 1 AND deleted_at IS NULL', [$email]);
+        // El correo es el del empleado (o el propio de una cuenta técnica).
+        $u = Db::fila(
+            'SELECT id, nombre FROM v_usuarios
+              WHERE id IN (' . Auth::SQL_CUENTA_POR_CORREO . ') AND activo = 1 AND deleted_at IS NULL
+                AND COALESCE(empleado_activo, 1) = 1',
+            [$email, $email],
+        );
         if ($u !== null) {
             $codigo = str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
             Db::query(
@@ -164,7 +170,10 @@ final class CuentaControlador
             throw $invalido;
         }
 
-        $u = Db::fila('SELECT id FROM usuarios WHERE email = ? AND activo = 1 AND deleted_at IS NULL', [$email]);
+        $u = Db::fila(
+            'SELECT id FROM usuarios WHERE id IN (' . Auth::SQL_CUENTA_POR_CORREO . ') AND activo = 1 AND deleted_at IS NULL',
+            [$email, $email],
+        );
         if ($u === null) {
             throw $invalido;
         }
@@ -222,13 +231,13 @@ final class CuentaControlador
                 if (mb_strtolower(trim((string) ($d['confirmacion'] ?? ''))) !== mb_strtolower(trim($nombre))) {
                     throw new HttpError(409, 'Escribe el nombre de la empresa tal como aparece para confirmar', ['codigo' => 'CONFIRMACION_INVALIDA']);
                 }
-                $empleados = Db::filas('SELECT id FROM asis_empleados WHERE empresa_id = ?', [$persona['empresa_id']]);
+                $empleados = Db::filas('SELECT id FROM empleados WHERE empresa_id = ?', [$persona['empresa_id']]);
                 // closeCursor: un CALL deja un resultado de estado pendiente que
                 // bloquearía la siguiente consulta («unbuffered queries»).
                 Db::query('CALL sp_anonimizar_empresa(?)', [$persona['empresa_id']])->closeCursor();
                 $resultado = ['eliminada' => 'empresa'];
             } else {
-                $empleados = Db::filas('SELECT id FROM asis_empleados WHERE usuario_id = ?', [$persona['id']]);
+                $empleados = Db::filas('SELECT empleado_id AS id FROM usuarios WHERE id = ? AND empleado_id IS NOT NULL', [$persona['id']]);
                 Db::query('CALL sp_anonimizar_usuario(?)', [$persona['id']])->closeCursor();
                 $resultado = ['eliminada' => 'cuenta'];
             }

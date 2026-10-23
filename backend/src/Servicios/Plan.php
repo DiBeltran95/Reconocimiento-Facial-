@@ -97,7 +97,7 @@ final class Plan
                 ]);
             }
             if (str_contains($mensaje, 'EMAIL_EN_USO')) {
-                return new HttpError(409, 'Ya hay una cuenta con ese correo', ['codigo' => 'EMAIL_EN_USO', 'campo' => 'email']);
+                return new HttpError(409, 'Ese correo ya lo usa otra persona', ['codigo' => 'EMAIL_EN_USO', 'campo' => 'email']);
             }
             return new HttpError(409, $mensaje !== '' ? $mensaje : 'Operación no permitida', ['codigo' => 'REGLA_NEGOCIO']);
         }
@@ -111,7 +111,7 @@ final class Plan
             $legible = [
                 'uk_sedes_empresa_codigo'        => ["Ya hay una sede con el código \"$valor\"", 'codigo'],
                 'uk_usuarios_email'              => ["Ya hay una cuenta con el correo \"$valor\"", 'email'],
-                'uk_usuarios_empresa_documento'  => ["Ya hay una persona con el documento \"$valor\"", 'documento'],
+                'uk_empleados_email'             => ["Ya hay una persona con el correo \"$valor\"", 'email'],
                 'uk_asis_emp_empresa_documento'  => ["Ya hay un empleado con el documento \"$valor\"", 'documento'],
             ][$m[2]] ?? null;
             if ($legible !== null) {

@@ -15,34 +15,39 @@ use App\Servicios\Plan;
 /**
  * Cuentas de acceso a Presente.
  *
- * El EMPLEADO es uno solo para las dos apps (su ficha en asis_empleados, con
- * documento, teléfono y correo). Aquí se le da acceso a PRESENTE con un rol de
- * Presente: GERENTE (sus sedes), TALENTO_HUMANO (todas las sedes) u OPERARIO.
- * Su rol en Ventario no se toca: lo decide Ventario. La única regla común es
- * que el administrador (dueño) lo es en las dos (ck_usuarios_roles).
+ * La PERSONA vive una sola vez, en `empleados` (nombre, documento, correo,
+ * teléfono, cargo, sede), para las dos apps. La cuenta (`usuarios`) solo dice
+ * a qué empleado pertenece (`empleado_id`), su contraseña, sus roles y su
+ * alcance; se lee con la vista `v_usuarios`. Aquí se le da acceso a PRESENTE
+ * con un rol: GERENTE (sus sedes), TALENTO_HUMANO (todas) u OPERARIO. Su rol
+ * en Ventario no se toca; la única regla común es que el administrador
+ * (dueño) lo es en las dos (ck_usuarios_roles).
  *
  *   · Si el empleado ya tiene cuenta (de Ventario), solo se le agrega Presente:
  *     entra con el mismo correo y contraseña.
  *   · Si no tiene, se crea con contraseña al azar y se le avisa por correo que
- *     cree la suya con «¿Olvidaste tu contraseña?».
+ *     cree la suya con «¿Olvidaste tu contraseña?». Si tuvo una y se dio de
+ *     baja, se reactiva la misma (su historial sigue a su nombre).
  *   · El OPERARIO es una cuenta técnica (los teléfonos de marcación), sin
- *     empleado: no ocupa cupo de personas.
+ *     empleado: guarda su propio nombre y correo y no ocupa cupo de personas.
  *
- * Las sedes de la cuenta (usuario_sedes) son las mismas en las dos apps: si
- * la persona ya trabaja en Ventario, sus sedes se gestionan allá. Solo el
- * administrador gestiona las cuentas.
+ * La pausa de Presente es la del EMPLEADO (`empleados.en_pausa`): no marca ni
+ * entra. Las sedes de la cuenta (usuario_sedes) son las mismas en las dos
+ * apps: si la persona ya trabaja en Ventario, se gestionan allá.
+ *
+ * Ojo: un UPDATE de `empleados` no puede cruzarse con `usuarios` (JOIN o
+ * subconsulta): su trigger marca la cuenta como modificada.
  */
 final class UsuariosControlador
 {
     /** Roles que se dan desde Presente (el administrador es el dueño, no se asigna). */
     private const ROLES_ASIGNABLES = [Auth::ROL_GERENTE, Auth::ROL_TALENTO_HUMANO, Auth::ROL_OPERARIO];
 
-    private const SELECT = "SELECT u.id, u.uuid, u.nombre, u.documento, u.email, u.telefono, u.rol, u.rol_asistencia,
-                                   u.activo, u.pausa_asistencia, u.created_at,
-                                   (SELECT e.id FROM asis_empleados e WHERE e.usuario_id = u.id LIMIT 1) AS empleado_id,
+    private const SELECT = "SELECT u.id, u.uuid, u.empleado_id, u.nombre, u.documento, u.email, u.telefono,
+                                   u.rol, u.rol_asistencia, u.activo, u.pausa_asistencia, u.created_at,
                                    (SELECT GROUP_CONCAT(us.sede_id ORDER BY us.sede_id) FROM usuario_sedes us
                                      WHERE us.usuario_id = u.id) AS sedes
-                              FROM usuarios u";
+                              FROM v_usuarios u";
 
     /** Cuentas con acceso a Presente. */
     public static function listar(Request $req): never
@@ -71,7 +76,8 @@ final class UsuariosControlador
         if ($admin['sedes'] === []) {
             Response::json(['empleados' => []]);
         }
-        $where = ['e.empresa_id = ?', 'e.activo = 1', '(e.usuario_id IS NULL OR u.rol_asistencia IS NULL)',
+        $where = ['e.empresa_id = ?', 'e.activo = 1',
+                  '(u.id IS NULL OR u.deleted_at IS NOT NULL OR u.rol_asistencia IS NULL)',
                   'e.sede_id IN (' . Db::enLista($admin['sedes']) . ')'];
         $params = [$admin['empresa_id'], ...$admin['sedes']];
         $q = trim((string) $req->query('q', ''));
@@ -80,11 +86,11 @@ final class UsuariosControlador
             array_push($params, "%$q%", "%$q%");
         }
         $filas = Db::filas(
-            'SELECT e.id, e.documento, e.nombre, e.cargo, e.telefono, COALESCE(e.email, u.email) AS email, e.sede_id,
-                    s.nombre AS sede, (u.id IS NOT NULL) AS con_cuenta
-               FROM asis_empleados e
+            'SELECT e.id, e.documento, e.nombre, e.cargo, e.telefono, e.email, e.sede_id,
+                    s.nombre AS sede, (u.id IS NOT NULL AND u.deleted_at IS NULL) AS con_cuenta
+               FROM empleados e
                JOIN sedes s ON s.id = e.sede_id
-               LEFT JOIN usuarios u ON u.id = e.usuario_id AND u.deleted_at IS NULL
+               LEFT JOIN usuarios u ON u.empleado_id = e.id
               WHERE ' . implode(' AND ', $where) . '
               ORDER BY e.nombre LIMIT 200',
             $params,
@@ -105,8 +111,9 @@ final class UsuariosControlador
 
     /**
      * Cuerpo: {rol_asistencia, empleado_id?, sedes?, email?, nombre?}
-     * Con empleado_id: acceso a Presente para ese empleado. Sin él: solo el
-     * OPERARIO (cuenta técnica) con nombre y correo.
+     * Con empleado_id: acceso a Presente para ese empleado (`email` solo si su
+     * ficha aún no tiene correo). Sin él: solo el OPERARIO (cuenta técnica)
+     * con nombre y correo propios.
      */
     public static function crear(Request $req): never
     {
@@ -120,47 +127,20 @@ final class UsuariosControlador
         $nueva = false;
         try {
             if ($empleadoId > 0) {
-                $ficha = Db::fila(
-                    'SELECT e.id, e.sede_id, e.documento, e.nombre, e.telefono, e.email, e.usuario_id,
-                            u.rol AS usuario_rol, u.rol_asistencia AS usuario_rol_asistencia, u.email AS usuario_email
-                       FROM asis_empleados e
-                       LEFT JOIN usuarios u ON u.id = e.usuario_id AND u.deleted_at IS NULL
-                      WHERE e.id = ? AND e.empresa_id = ? AND e.activo = 1',
-                    [$empleadoId, $admin['empresa_id']],
-                ) ?? throw HttpError::noEncontrado('Empleado');
-                Auth::exigirSede($admin, (int) $ficha['sede_id']);
-
-                if ($ficha['usuario_id'] !== null && $ficha['usuario_rol_asistencia'] !== null) {
-                    throw new HttpError(409, 'Ese empleado ya tiene acceso a Presente', ['codigo' => 'YA_TIENE_ACCESO']);
-                }
-                if ($ficha['usuario_id'] !== null && $ficha['usuario_email'] !== null) {
-                    // Ya entra a Ventario: se le agrega Presente con su misma cuenta.
-                    $id = (int) $ficha['usuario_id'];
-                    $sedes = $ficha['usuario_rol'] !== null
-                        ? self::sedesDe($id) // las gestiona Ventario
-                        : self::validarSedes($d['sedes'] ?? [], $admin);
-                    self::validarSedesDelRol($rol, $sedes);
-                    Db::query('UPDATE usuarios SET rol_asistencia = ?, pausa_asistencia = 0 WHERE id = ?', [$rol, $id]);
-                    if ($ficha['usuario_rol'] === null) {
-                        self::fijarSedes($id, $sedes);
-                    }
-                } else {
-                    $email = self::validarEmail($d['email'] ?? $ficha['email'] ?? '');
-                    $sedes = self::validarSedes($d['sedes'] ?? [], $admin);
-                    self::validarSedesDelRol($rol, $sedes);
-                    $id = self::insertarCuenta($admin['empresa_id'], $ficha['nombre'], $ficha['documento'], $email,
-                        $ficha['telefono'], $rol, (int) $ficha['id']);
-                    self::fijarSedes($id, $sedes);
-                    Db::query('UPDATE asis_empleados SET usuario_id = ?, email = COALESCE(email, ?) WHERE id = ?',
-                        [$id, $email, $ficha['id']]);
-                    $nueva = true;
-                }
+                [$id, $nueva] = self::accesoDeEmpleado($admin, $empleadoId, $rol, $d);
             } else {
                 if ($rol !== Auth::ROL_OPERARIO) {
                     throw HttpError::validacion('Elige el empleado al que le das acceso', 'empleado_id');
                 }
-                $id = self::insertarCuenta($admin['empresa_id'], self::validarNombre($d['nombre'] ?? ''), null,
-                    self::validarEmail($d['email'] ?? ''), null, $rol, null);
+                $email = self::validarEmail($d['email'] ?? '');
+                self::exigirCorreoLibre($email);
+                Db::query(
+                    'INSERT INTO usuarios (uuid, empresa_id, nombre, email, password_hash, rol, rol_asistencia)
+                     VALUES (?, ?, ?, ?, ?, NULL, ?)',
+                    [Ids::uuid(), $admin['empresa_id'], self::validarNombre($d['nombre'] ?? ''), $email,
+                     self::claveAlAzar(), $rol],
+                );
+                $id = (int) $pdo->lastInsertId();
                 $nueva = true;
             }
             $pdo->commit();
@@ -176,6 +156,71 @@ final class UsuariosControlador
             'cuenta_existente' => !$nueva,
             'aviso_enviado'    => $aviso,
         ], 201);
+    }
+
+    /**
+     * Da acceso a Presente a un empleado, dentro de la transacción de crear.
+     * @return array{0:int, 1:bool}  [id de la cuenta, ¿cuenta nueva (o reactivada)?]
+     */
+    private static function accesoDeEmpleado(array $admin, int $empleadoId, string $rol, array $d): array
+    {
+        $ficha = Db::fila(
+            'SELECT e.id, e.sede_id, e.email, u.id AS usuario_id, u.rol AS usuario_rol,
+                    u.rol_asistencia AS usuario_rol_asistencia, u.deleted_at AS cuenta_borrada
+               FROM empleados e
+               LEFT JOIN usuarios u ON u.empleado_id = e.id
+              WHERE e.id = ? AND e.empresa_id = ? AND e.activo = 1',
+            [$empleadoId, $admin['empresa_id']],
+        ) ?? throw HttpError::noEncontrado('Empleado');
+        Auth::exigirSede($admin, (int) $ficha['sede_id']);
+
+        $viva = $ficha['usuario_id'] !== null && $ficha['cuenta_borrada'] === null;
+        if ($viva && $ficha['usuario_rol_asistencia'] !== null) {
+            throw new HttpError(409, 'Ese empleado ya tiene acceso a Presente', ['codigo' => 'YA_TIENE_ACCESO']);
+        }
+
+        if ($viva) {
+            // Ya entra a Ventario: se le agrega Presente con su misma cuenta.
+            $id = (int) $ficha['usuario_id'];
+            $conVentario = $ficha['usuario_rol'] !== null;
+            $sedes = $conVentario ? self::sedesDe($id) : self::validarSedes($d['sedes'] ?? [], $admin);
+            self::validarSedesDelRol($rol, $sedes, $conVentario);
+            Db::query('UPDATE usuarios SET rol_asistencia = ? WHERE id = ?', [$rol, $id]);
+            if (!$conVentario) {
+                self::fijarSedes($id, $sedes);
+            }
+            return [$id, false];
+        }
+
+        // Sin cuenta: entra con el correo de su ficha (se completa si no tenía).
+        $email = $ficha['email'] ?? self::validarEmail($d['email'] ?? '');
+        if ($ficha['email'] === null) {
+            self::exigirCorreoLibre($email, (int) $ficha['id']);
+            Db::query('UPDATE empleados SET email = ? WHERE id = ? AND empresa_id = ?',
+                [$email, $ficha['id'], $admin['empresa_id']]);
+        }
+        $sedes = self::validarSedes($d['sedes'] ?? [], $admin);
+        self::validarSedesDelRol($rol, $sedes);
+
+        if ($ficha['usuario_id'] !== null) {
+            // Tuvo cuenta y se dio de baja: se reactiva la misma.
+            $id = (int) $ficha['usuario_id'];
+            Db::query(
+                'UPDATE usuarios SET password_hash = ?, rol = NULL, rol_asistencia = ?, activo = 1,
+                        deleted_at = NULL, pausa_inventario = 0
+                  WHERE id = ?',
+                [self::claveAlAzar(), $rol, $id],
+            );
+        } else {
+            Db::query(
+                'INSERT INTO usuarios (uuid, empresa_id, empleado_id, password_hash, rol, rol_asistencia)
+                 VALUES (?, ?, ?, ?, NULL, ?)',
+                [Ids::uuid(), $admin['empresa_id'], $ficha['id'], self::claveAlAzar(), $rol],
+            );
+            $id = (int) Db::pdo()->lastInsertId();
+        }
+        self::fijarSedes($id, $sedes);
+        return [$id, true];
     }
 
     /** Cambia el rol de Presente, las sedes, el estado o (operario) el nombre. */
@@ -204,16 +249,16 @@ final class UsuariosControlador
         if (!$esAdmin) {
             self::validarSedesDelRol($rol, $sedes, $actual['rol'] !== null);
         }
-        $nombre = $actual['nombre'];
-        if (array_key_exists('nombre', $d) && $actual['empleado_id'] === null) {
-            $nombre = self::validarNombre($d['nombre']);
-        }
 
         $pdo = Db::pdo();
         $pdo->beginTransaction();
         try {
-            Db::query('UPDATE usuarios SET nombre = ?, rol_asistencia = ?, activo = ? WHERE id = ?',
-                [$nombre, $rol, $activo, $actual['id']]);
+            Db::query('UPDATE usuarios SET rol_asistencia = ?, activo = ? WHERE id = ?', [$rol, $activo, $actual['id']]);
+            // El nombre es de la persona (se edita en Personal); solo la cuenta
+            // técnica del operario tiene uno propio.
+            if (array_key_exists('nombre', $d) && $actual['empleado_id'] === null) {
+                Db::query('UPDATE usuarios SET nombre = ? WHERE id = ?', [self::validarNombre($d['nombre']), $actual['id']]);
+            }
             if ($tocaSedes) {
                 self::fijarSedes((int) $actual['id'], $sedes);
             }
@@ -231,7 +276,8 @@ final class UsuariosControlador
 
     /**
      * Quitar el acceso a Presente. Si también entra a Ventario, solo pierde
-     * Presente; si no, la cuenta se da de baja y el empleado sigue existiendo.
+     * Presente; si no, la cuenta se da de baja y el empleado sigue existiendo
+     * (si se le vuelve a dar acceso, se reactiva esta misma cuenta).
      */
     public static function quitar(Request $req): never
     {
@@ -244,10 +290,9 @@ final class UsuariosControlador
         $pdo->beginTransaction();
         try {
             if ($u['rol'] !== null) {
-                Db::query('UPDATE usuarios SET rol_asistencia = NULL, pausa_asistencia = 0 WHERE id = ?', [$u['id']]);
+                Db::query('UPDATE usuarios SET rol_asistencia = NULL WHERE id = ?', [$u['id']]);
             } else {
                 Db::query('UPDATE usuarios SET deleted_at = UTC_TIMESTAMP(3), activo = 0 WHERE id = ?', [$u['id']]);
-                Db::query('UPDATE asis_empleados SET usuario_id = NULL WHERE usuario_id = ?', [$u['id']]);
                 Db::query('UPDATE refresh_tokens SET revoked_at = UTC_TIMESTAMP(3) WHERE usuario_id = ? AND revoked_at IS NULL', [$u['id']]);
             }
             $pdo->commit();
@@ -259,8 +304,9 @@ final class UsuariosControlador
     }
 
     /**
-     * Pausa o reactiva una cuenta en Presente (el plan no alcanza para todos).
-     * Reactivar exige cupo: LIMITE_PLAN → 409. Al administrador no se le pausa.
+     * Pausa o reactiva a la PERSONA en Presente (el plan no alcanza para
+     * todos): no marca ni entra a Presente. Reactivar exige cupo: LIMITE_PLAN
+     * → 409. Al administrador no se le pausa; el operario no es una persona.
      */
     public static function pausar(Request $req): never
     {
@@ -270,33 +316,36 @@ final class UsuariosControlador
         if ($pausada && $u['rol_asistencia'] === Auth::ROL_ADMIN) {
             throw HttpError::validacion('Al administrador no se le pausa');
         }
-        Db::query('UPDATE usuarios SET pausa_asistencia = ? WHERE id = ?', [$pausada ? 1 : 0, $u['id']]);
+        if ($u['empleado_id'] === null) {
+            throw HttpError::validacion('La cuenta del operario no ocupa cupo: no se pausa');
+        }
+        Db::query('UPDATE empleados SET en_pausa = ? WHERE id = ? AND empresa_id = ?',
+            [$pausada ? 1 : 0, $u['empleado_id'], $yo['empresa_id']]);
         Response::json(['usuario' => self::aJson(self::buscar((int) $u['id'], $yo))]);
     }
 
     // ---------------------------------------------------------------------
 
-    /** Inserta la cuenta con contraseña al azar (nadie la conoce). */
-    private static function insertarCuenta(int $empresaId, string $nombre, ?string $documento, string $email,
-                                           ?string $telefono, string $rol, ?int $fichaId): int
+    /** Contraseña inicial al azar (nadie la conoce): la persona crea la suya. */
+    private static function claveAlAzar(): string
     {
-        // El correo es la identidad para entrar: único en TODA la plataforma.
-        if (Db::valor('SELECT 1 FROM usuarios WHERE email = ?', [$email]) !== null) {
-            throw new HttpError(409, 'Ya hay una cuenta con ese correo', ['campo' => 'email', 'codigo' => 'EMAIL_EN_USO']);
+        return Auth::hashPassword(bin2hex(random_bytes(24)));
+    }
+
+    /**
+     * El correo es con lo que se entra a la plataforma: no puede tenerlo otra
+     * persona ni una cuenta técnica. La base lo exige igual (EMAIL_EN_USO).
+     */
+    private static function exigirCorreoLibre(string $email, ?int $empleadoId = null): void
+    {
+        $otro = Db::valor(
+            'SELECT 1 FROM empleados WHERE email = ? AND id <> COALESCE(?, 0)
+             UNION ALL SELECT 1 FROM usuarios WHERE email = ? LIMIT 1',
+            [$email, $empleadoId, $email],
+        );
+        if ($otro !== null) {
+            throw new HttpError(409, 'Ese correo ya lo usa otra persona', ['campo' => 'email', 'codigo' => 'EMAIL_EN_USO']);
         }
-        // Si el empleado ya ocupaba su cupo, el trigger no lo cuenta dos veces.
-        Db::query('SET @cupo_vincula_empleado = ?', [$fichaId]);
-        try {
-            Db::query(
-                'INSERT INTO usuarios (uuid, empresa_id, nombre, documento, email, telefono, password_hash, rol, rol_asistencia)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)',
-                [Ids::uuid(), $empresaId, $nombre, $documento, $email, $telefono,
-                 Auth::hashPassword(bin2hex(random_bytes(24))), $rol],
-            );
-        } finally {
-            Db::query('SET @cupo_vincula_empleado = NULL');
-        }
-        return (int) Db::pdo()->lastInsertId();
     }
 
     /** Aviso de acceso, sin contraseña. Si el correo falla la cuenta queda igual. */
@@ -330,7 +379,7 @@ final class UsuariosControlador
             'nombre'           => $u['nombre'],
             'documento'        => $u['documento'],
             'email'            => $u['email'],
-            'telefono'         => $u['telefono'] ?? null,
+            'telefono'         => $u['telefono'],
             'usuario'          => $u['email'],
             'rol'              => $u['rol_asistencia'] === null ? null
                 : ($u['rol_asistencia'] === Auth::ROL_OPERARIO ? Auth::GENERAL : Auth::ADMINISTRATIVO),
@@ -401,10 +450,7 @@ final class UsuariosControlador
         return $ids;
     }
 
-    /**
-     * El gerente necesita al menos una sede. Talento humano y operario son de
-     * todas las sedes: no se les asignan (salvo las que ya tenga por Ventario).
-     */
+    /** Gerente: al menos una sede. Talento humano y operario: todas (ninguna asignada). */
     private static function validarSedesDelRol(string $rol, array $sedes, bool $conVentario = false): void
     {
         $error = match (true) {

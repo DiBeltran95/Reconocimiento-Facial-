@@ -16,11 +16,11 @@ dos backends y en las dos apps (este archivo existe igual en los dos repositorio
 
 ```
 planes ──< empresas ──< sedes ──< (ventas, stock, traslados, cierres, dispositivos, marcaciones…)
-              │ ├──< usuarios  (una cuenta por persona, un rol por app)
+              │ ├──< empleados (la PERSONA: nombre, documento, correo, teléfono, cargo, sede)
+              │ │      └──< usuarios (su cuenta: contraseña, un rol por app, pausas; empleado_id)
               │ ├──< empresa_aplicativos (INVENTARIO / ASISTENCIA habilitadas)
               │ ├──< empresa_configuracion
               │ └──< catálogo (categorías, proveedores, productos, códigos, medios de pago)
-              └──< asis_empleados (personas que marcan; opcionalmente ligadas a una cuenta)
 ```
 
 Migraciones (en este orden, con `npm run db:migrate` y `DB_MIGRACIONES_EXTRA` apuntando a la carpeta
@@ -34,8 +34,12 @@ una **empresa fundadora** (plan ILIMITADO, las dos apps habilitadas, `prefijo_we
 
 ## 2. Cuentas y roles
 
-Una fila de `usuarios` por persona. El correo es único en toda la plataforma y es con lo que se
-entra a las dos apps.
+La persona vive UNA vez, en `empleados` (migración `CONTROL PERSONAL/database/007_empleados.sql`):
+nombre, documento, correo, teléfono, cargo y sede. Su cuenta (`usuarios`) solo guarda `empleado_id`,
+la contraseña, los roles y las pausas; se lee con la vista `v_usuarios` (cuenta + empleado). El
+correo del empleado es único en toda la plataforma y es con lo que se entra a las dos apps. Solo las
+cuentas técnicas sin empleado (Operario, superadministrador) guardan nombre y correo propios
+(`ck_usuarios_persona`). La pausa de Presente es la del empleado (`empleados.en_pausa`).
 
 | Columna | Valores | `NULL` significa |
 |---|---|---|

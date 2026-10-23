@@ -267,9 +267,13 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
               const SizedBox(height: Espacio.md),
               TextFormField(
                 controller: _email,
+                // Con cuenta, este es el correo con el que entra a las apps (vive
+                // solo aquí): obligatorio, y cambiarlo cambia su acceso.
                 decoration: InputDecoration(
-                  labelText: 'Correo (opcional)',
-                  helperText: 'Con él se le puede dar acceso a Presente o a Ventario sin volver a escribir sus datos.',
+                  labelText: widget.empleado?.cuentaEmail != null ? 'Correo de acceso' : 'Correo (opcional)',
+                  helperText: widget.empleado?.cuentaEmail != null
+                      ? 'Con este correo entra a Presente y Ventario. Si lo cambias, entrará con el nuevo.'
+                      : 'Con él se le puede dar acceso a Presente o a Ventario sin volver a escribir sus datos.',
                   helperMaxLines: 2,
                   prefixIcon: const Icon(Icons.alternate_email_rounded),
                   errorText: _errorDe('email'),
@@ -278,7 +282,10 @@ class _EmpleadoFormPageState extends State<EmpleadoFormPage> {
                 autocorrect: false,
                 validator: (v) {
                   final t = (v ?? '').trim();
-                  return t.isEmpty || RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(t) ? null : 'Escribe un correo válido';
+                  if (t.isEmpty) {
+                    return widget.empleado?.cuentaEmail != null ? 'Con este correo entra a las apps: no puede quedar vacío' : null;
+                  }
+                  return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(t) ? null : 'Escribe un correo válido';
                 },
               ),
               const SizedBox(height: Espacio.md),

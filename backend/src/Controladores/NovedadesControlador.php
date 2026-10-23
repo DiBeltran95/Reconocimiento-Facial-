@@ -56,9 +56,9 @@ final class NovedadesControlador
                     r.nombre AS resuelto_por_nombre,
                     (SELECT COUNT(*) FROM asis_novedad_soportes x WHERE x.novedad_id = n.id) AS soportes
                FROM asis_novedades n
-               JOIN asis_empleados e ON e.id = n.empleado_id
+               JOIN empleados e ON e.id = n.empleado_id
                JOIN sedes s ON s.id = e.sede_id
-               LEFT JOIN usuarios r ON r.id = n.resuelto_por
+               LEFT JOIN v_usuarios r ON r.id = n.resuelto_por
               WHERE n.empresa_id = ? AND e.sede_id IN (' . Db::enLista($sedes) . ')
                 AND ' . ($pendientes ? "n.estado = 'PENDIENTE'" : "n.estado <> 'PENDIENTE'") . '
               ORDER BY ' . ($pendientes ? 'n.created_at ASC' : 'COALESCE(n.resuelto_en, n.updated_at) DESC') . '
@@ -66,7 +66,7 @@ final class NovedadesControlador
             [$admin['empresa_id'], ...$sedes],
         );
         $total = (int) Db::valor(
-            "SELECT COUNT(*) FROM asis_novedades n JOIN asis_empleados e ON e.id = n.empleado_id
+            "SELECT COUNT(*) FROM asis_novedades n JOIN empleados e ON e.id = n.empleado_id
               WHERE n.empresa_id = ? AND n.estado = 'PENDIENTE' AND e.sede_id IN (" . Db::enLista($sedes) . ')',
             [$admin['empresa_id'], ...$sedes],
         );
@@ -211,9 +211,9 @@ final class NovedadesControlador
                     s.nombre AS sede, r.nombre AS resuelto_por_nombre,
                     (SELECT COUNT(*) FROM asis_novedad_soportes x WHERE x.novedad_id = n.id) AS soportes
                FROM asis_novedades n
-               JOIN asis_empleados e ON e.id = n.empleado_id
+               JOIN empleados e ON e.id = n.empleado_id
                JOIN sedes s ON s.id = e.sede_id
-               LEFT JOIN usuarios r ON r.id = n.resuelto_por
+               LEFT JOIN v_usuarios r ON r.id = n.resuelto_por
               WHERE n.id = ? AND n.empresa_id = ?',
             [$id, $admin['empresa_id']],
         ) ?? throw HttpError::noEncontrado('Solicitud');

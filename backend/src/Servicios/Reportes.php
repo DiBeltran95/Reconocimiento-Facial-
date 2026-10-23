@@ -47,7 +47,7 @@ final class Reportes
         }
         $empleados = Db::filas(
             "SELECT id, documento, nombre, cargo
-               FROM asis_empleados
+               FROM empleados
               WHERE (sede_id = ? AND activo = 1 AND created_at < ?)$extra
               ORDER BY nombre",
             $params,

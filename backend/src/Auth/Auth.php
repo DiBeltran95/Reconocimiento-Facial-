@@ -120,6 +120,16 @@ final class Auth
     }
 
     /**
+     * Ids de la cuenta que entra con ese correo (dos parámetros: el mismo
+     * correo). Es el correo del EMPLEADO; solo las cuentas técnicas (Operario,
+     * superadministrador) tienen uno propio. Dos búsquedas por índice.
+     */
+    public const SQL_CUENTA_POR_CORREO =
+        'SELECT id FROM usuarios WHERE email = ?
+         UNION ALL
+         SELECT x.id FROM usuarios x JOIN empleados em ON em.id = x.empleado_id WHERE em.email = ?';
+
+    /**
      * Busca y valida credenciales. Devuelve la persona o null si la contraseña
      * no coincide. Con la contraseña correcta sí se explica por qué no entra
      * (cuenta inactiva, empresa suspendida, app no habilitada, sin rol aquí):
@@ -130,8 +140,9 @@ final class Auth
     public static function autenticar(string $email, string $password): ?array
     {
         $u = Db::fila(
-            'SELECT id, password_hash, es_superadmin FROM usuarios WHERE email = ? AND deleted_at IS NULL LIMIT 1',
-            [$email],
+            'SELECT id, password_hash, es_superadmin FROM usuarios
+              WHERE id IN (' . self::SQL_CUENTA_POR_CORREO . ') AND deleted_at IS NULL LIMIT 1',
+            [$email, $email],
         );
         if ($u === null || !self::verificarPassword($password, (string) $u['password_hash'])) {
             return null;
@@ -149,10 +160,11 @@ final class Auth
     private static function cargar(int $id, bool $explicar = false): ?array
     {
         $u = Db::fila(
-            "SELECT u.id, u.uuid, u.nombre, u.email, u.rol AS rol_inventario, u.rol_asistencia,
-                    u.activo, u.pausa_asistencia, u.empresa_id, e.estado AS empresa_estado, e.deleted_at AS empresa_borrada,
+            "SELECT u.id, u.uuid, u.empleado_id, u.nombre, u.email, u.rol AS rol_inventario, u.rol_asistencia,
+                    (u.activo = 1 AND COALESCE(u.empleado_activo, 1) = 1) AS activo,
+                    u.pausa_asistencia, u.empresa_id, e.estado AS empresa_estado, e.deleted_at AS empresa_borrada,
                     e.zona_horaria, ea.activo AS app_habilitada
-               FROM usuarios u
+               FROM v_usuarios u
                LEFT JOIN empresas e ON e.id = u.empresa_id
                LEFT JOIN empresa_aplicativos ea ON ea.empresa_id = u.empresa_id AND ea.aplicativo = 'ASISTENCIA'
               WHERE u.id = ? AND u.deleted_at IS NULL AND u.es_superadmin = 0",
@@ -186,6 +198,7 @@ final class Auth
             'uuid'           => (string) $u['uuid'],
             'nombre'         => (string) $u['nombre'],
             'email'          => (string) $u['email'],
+            'empleado_id'    => $u['empleado_id'] === null ? null : (int) $u['empleado_id'],
             'rol'            => $rolAsis === self::ROL_OPERARIO ? self::GENERAL : self::ADMINISTRATIVO,
             'rol_asistencia' => $rolAsis,
             'rol_inventario' => $u['rol_inventario'],

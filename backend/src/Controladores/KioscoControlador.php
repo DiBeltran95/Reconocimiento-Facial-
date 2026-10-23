@@ -28,13 +28,14 @@ final class KioscoControlador
         $disp = Auth::dispositivo($req);
         Db::query('UPDATE asis_dispositivos SET ultimo_sync = UTC_TIMESTAMP() WHERE id = ?', [$disp['id']]);
 
-        // Un empleado ligado a una cuenta inactiva (la desactivaron en
-        // cualquiera de las dos apps) deja de bajar: ya no puede marcar.
+        // Un empleado con su cuenta inactiva (la desactivaron en cualquiera de
+        // las dos apps) deja de bajar: ya no puede marcar. Una cuenta dada de
+        // baja solo le quitó el acceso a las apps: sigue marcando.
         $filas = Db::filas(
-            'SELECT e.id, e.documento, e.nombre, e.cargo FROM asis_empleados e
-               LEFT JOIN usuarios u ON u.id = e.usuario_id
+            'SELECT e.id, e.documento, e.nombre, e.cargo FROM empleados e
+               LEFT JOIN usuarios u ON u.empleado_id = e.id AND u.deleted_at IS NULL
               WHERE e.sede_id = ? AND e.activo = 1 AND e.en_pausa = 0
-                AND (e.usuario_id IS NULL OR (u.activo = 1 AND u.deleted_at IS NULL))
+                AND (u.id IS NULL OR u.activo = 1)
               ORDER BY e.nombre',
             [$disp['sede_id']],
         );
@@ -111,7 +112,7 @@ final class KioscoControlador
         // kiosco solo lo tenía si estaba activo aquí cuando sincronizó).
         $existentes = $ids === [] ? [] : array_flip(array_map('intval', array_column(
             Db::filas(
-                'SELECT id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
+                'SELECT id FROM empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
                 [...$ids, $disp['empresa_id']],
             ),
             'id',

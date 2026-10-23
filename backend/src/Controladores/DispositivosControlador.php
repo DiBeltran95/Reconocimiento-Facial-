@@ -38,7 +38,7 @@ final class DispositivosControlador
                     v.nombre AS vinculado_por
                FROM asis_dispositivos d
                JOIN sedes s ON s.id = d.sede_id
-               LEFT JOIN usuarios v ON v.id = d.vinculado_por
+               LEFT JOIN v_usuarios v ON v.id = d.vinculado_por
               WHERE d.activo = 1 AND d.sede_id IN (' . Db::enLista($admin['sedes']) . ')
               ORDER BY s.nombre, d.nombre',
             $admin['sedes'],

@@ -222,7 +222,12 @@ class _FormNuevaCuentaState extends State<_FormNuevaCuenta> {
       });
 
   bool get _pideSedes => !_tecnica && _rol == RolAsistencia.gerente && !(_empleado?.conCuenta ?? false);
-  bool get _pideCorreo => _tecnica || !(_empleado?.conCuenta ?? true);
+  /// El correo es el del EMPLEADO: solo se pide si su ficha aún no tiene
+  /// (o para la cuenta técnica del operario). Si ya tiene, se muestra fijo.
+  bool get _pideCorreo =>
+      _tecnica || (!(_empleado?.conCuenta ?? true) && (_empleado?.email ?? '').isEmpty);
+  String? get _correoFicha =>
+      !_tecnica && !(_empleado?.conCuenta ?? true) && (_empleado?.email ?? '').isNotEmpty ? _empleado!.email : null;
 
   Future<void> _guardar() async {
     // Un segundo toque mientras guarda no envía otra alta.
@@ -399,6 +404,17 @@ class _FormNuevaCuentaState extends State<_FormNuevaCuenta> {
                   ),
                   validator: (v) =>
                       RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch((v ?? '').trim()) ? null : 'Escribe un correo válido',
+                ),
+              if (_correoFicha != null)
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Entrará con el correo de su ficha',
+                    helperText: 'Para cambiarlo, edítalo en Personal. Le llegará un aviso para crear su contraseña.',
+                    helperMaxLines: 2,
+                    prefixIcon: Icon(Icons.alternate_email_rounded),
+                    suffixIcon: Icon(Icons.lock_outline_rounded, size: 18),
+                  ),
+                  child: Text(_correoFicha!, style: context.textos.bodyLarge),
                 ),
               if (_error != null) ...[
                 const SizedBox(height: Espacio.md),

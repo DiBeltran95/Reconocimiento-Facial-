@@ -27,7 +27,7 @@ restore_error_handler();
 restore_exception_handler();
 
 $borradas = 0;
-foreach (Db::filas("SELECT id FROM asis_empleados WHERE documento LIKE 'ELIM%'") as $fila) {
+foreach (Db::filas("SELECT id FROM empleados WHERE documento LIKE 'ELIM%'") as $fila) {
     $id = (int) $fila['id'];
     if (Fotos::listar($id) !== []) {
         Fotos::borrarTodas($id);

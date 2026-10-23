@@ -115,7 +115,7 @@ final class HorariosControlador
             throw HttpError::validacion('Selecciona entre 1 y 500 empleados', 'empleados');
         }
         $encontrados = Db::filas(
-            'SELECT id, sede_id FROM asis_empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
+            'SELECT id, sede_id FROM empleados WHERE id IN (' . Db::enLista($ids) . ') AND empresa_id = ?',
             [...$ids, $admin['empresa_id']],
         );
         if (count($encontrados) !== count($ids)) {
@@ -207,7 +207,7 @@ final class HorariosControlador
 
     private static function empleado(int $id, array $admin): int
     {
-        $e = Db::fila('SELECT id, sede_id FROM asis_empleados WHERE id = ? AND empresa_id = ?', [$id, $admin['empresa_id']]);
+        $e = Db::fila('SELECT id, sede_id FROM empleados WHERE id = ? AND empresa_id = ?', [$id, $admin['empresa_id']]);
         if ($e === null) {
             throw HttpError::noEncontrado('Empleado');
         }
